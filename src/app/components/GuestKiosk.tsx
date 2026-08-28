@@ -184,7 +184,7 @@ export interface KioskBooking {
 export interface GuestKioskLiveConfig {
   screen: Screen;
   navigate: (screen: Screen) => void;
-  suites: { id: string; name: string; kind: string }[];
+  suites: { id: string; name: string; kind: string; status?: string; isOccupied?: boolean }[];
   selectedSuiteId: string;
   onSelectSuite: (id: string) => void;
   onAssign: () => void | Promise<void>;
@@ -216,6 +216,19 @@ export interface GuestKioskLiveConfig {
 }
 
 const STAFF_PIN = '1234';
+
+function suiteStatusLabel(status?: string, isOccupied?: boolean): string {
+  if (isOccupied || status === 'occupied' || status === 'food-served') {
+    return 'Occupied';
+  }
+  if (status === 'available') {
+    return 'Available';
+  }
+  if (status === 'cleaning') {
+    return 'Cleaning';
+  }
+  return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Available';
+}
 
 // ── Shared header component ────────────────────────────────────────────────────
 function KioskHeader({ subtitle }: { subtitle?: string }) {
@@ -682,21 +695,33 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   Select Suite / Lobby
                 </label>
                 {live?.isLoadingSuites ? (
-                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>Loading occupied suites…</p>
+                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>Loading suites…</p>
                 ) : suiteList.length === 0 ? (
-                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>No occupied suites available.</p>
+                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>No active suites found.</p>
                 ) : (
                 <div className="grid grid-cols-2 gap-2 mb-6">
-                  {suiteList.map(s => (
+                  {suiteList.map(s => {
+                    const statusLabel = suiteStatusLabel(s.status, s.isOccupied);
+                    const isOccupied = s.isOccupied ?? statusLabel === 'Occupied';
+                    return (
                     <button key={s.id} onClick={() => setSelectedSuiteId(s.id)}
-                      className="flex flex-col items-start gap-0.5 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px]"
+                      className="flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px]"
                       style={selectedSuiteId === s.id
                         ? { background: C.accentDim, borderColor: C.accent, color: C.text }
                         : { background: C.bg, borderColor: C.border, color: C.textMid }}>
-                      <span className="text-sm font-medium">{s.name}</span>
+                      <div className="flex w-full items-start justify-between gap-2">
+                        <span className="text-sm font-medium">{s.name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+                          style={isOccupied
+                            ? { background: C.accentDim, color: C.accent, border: `1px solid ${C.accent}55` }
+                            : { background: C.bg2, color: C.textLight, border: `1px solid ${C.border}` }}>
+                          {statusLabel}
+                        </span>
+                      </div>
                       <span className="text-xs opacity-60">{s.kind}</span>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
                 )}
                 {live?.assignError && (
