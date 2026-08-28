@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
@@ -158,7 +158,7 @@ const MENU: MenuItem[] = [
 const CATEGORIES = ['All', ...Array.from(new Set(MENU.map(i => i.category)))];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-export interface MenuItem { id: string; name: string; category: string; description: string; image: string; allergens?: string[] }
+export interface MenuItem { id: string; name: string; category: string; description: string; image: string; allergens?: string[]; sectionId?: number }
 interface CartItem extends MenuItem { qty: number; customNote?: string; kitchenStatus?: string }
 export interface PlacedOrder { orderNo: string; placedAt: Date; items: CartItem[]; note: string }
 export type KioskScreen = 'assign' | 'welcome' | 'menu' | 'cart' | 'confirm' | 'history';
@@ -187,15 +187,30 @@ export interface GuestKioskLiveConfig {
   suites: { id: string; name: string; kind: string; status?: string; isOccupied?: boolean }[];
   selectedSuiteId: string;
   onSelectSuite: (id: string) => void;
-  onAssign: () => void | Promise<void>;
+  onPairSuite?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
   isAssigning?: boolean;
   isLoadingSuites?: boolean;
   suitesLoadError?: string | null;
   assignError?: string | null;
   submitError?: string | null;
+  unassignedBookings?: Array<{
+    id: number;
+    booking_number: string;
+    guest_name: string;
+    pax: number;
+    flight_number?: string | null;
+    flight_time?: string | null;
+  }>;
+  isLoadingUnassignedBookings?: boolean;
+  isStaffAuthenticated?: boolean;
+  onStaffLogin?: (email: string, password: string) => void | Promise<void>;
+  isStaffLoggingIn?: boolean;
+  staffAuthError?: string | null;
+  onStaffLogout?: () => void;
   assignedSuite: { name: string; kind: string } | null;
   guestName: string;
   menuItems: MenuItem[];
+  menuSections?: Array<{ id: number; name: string }>;
   categories: string[];
   cart: CartItem[];
   onAddItem: (item: MenuItem) => void;
@@ -209,26 +224,82 @@ export interface GuestKioskLiveConfig {
   orderNo: string;
   orders: PlacedOrder[];
   confirmCart?: CartItem[];
-  booking: KioskBooking | null;
-  staffPin: string;
+  booking?: KioskBooking | null;
   onStaffReset: () => void;
-  onStaffUnlock?: () => void;
   hideDemoToggle?: boolean;
 }
 
-const STAFF_PIN = '1234';
-
 function suiteStatusLabel(status?: string, isOccupied?: boolean): string {
-  if (isOccupied || status === 'occupied' || status === 'food-served') {
+  const normalized = String(status ?? '').toLowerCase();
+  if (isOccupied || normalized === 'occupied') {
     return 'Occupied';
   }
-  if (status === 'available') {
-    return 'Available';
+  if (normalized === 'food-served') {
+    return 'Food Served';
   }
-  if (status === 'cleaning') {
+  if (normalized === 'cleaning') {
     return 'Cleaning';
   }
+  if (normalized === 'reserved') {
+    return 'Reserved';
+  }
+  if (normalized === 'walk-in' || normalized === 'walkin') {
+    return 'Walk-in';
+  }
+  if (normalized === 'available') {
+    return 'Available';
+  }
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Available';
+}
+
+/** Tailwind badge classes aligned with POS Floor Plan legend. */
+function suiteStatusBadgeClass(status?: string, isOccupied?: boolean): string {
+  const normalized = String(status ?? '').toLowerCase();
+  if (isOccupied || normalized === 'occupied') {
+    return 'bg-red-100 text-red-800';
+  }
+  if (normalized === 'food-served') {
+    return 'bg-yellow-100 text-yellow-800';
+  }
+  if (normalized === 'cleaning') {
+    return 'bg-orange-100 text-orange-800';
+  }
+  if (normalized === 'reserved') {
+    return 'bg-blue-100 text-blue-800';
+  }
+  return 'bg-green-100 text-green-800';
+}
+
+function ProductThumbnail({
+  imageUrl,
+  alt,
+  variant = 'menu',
+}: {
+  imageUrl?: string | null;
+  alt: string;
+  variant?: 'menu' | 'cart';
+}) {
+  const src = imageUrl?.trim();
+  const menuClasses = 'w-20 aspect-square object-cover';
+  const cartClasses = 'w-16 h-16 rounded-md object-cover aspect-square mr-4';
+
+  if (!src) {
+    return (
+      <div
+        className={`shrink-0 bg-gray-200 ${variant === 'menu' ? menuClasses : cartClasses}`}
+        aria-hidden
+      />
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      className={`shrink-0 ${variant === 'menu' ? menuClasses : cartClasses}`}
+    />
+  );
 }
 
 // ── Shared header component ────────────────────────────────────────────────────
@@ -354,10 +425,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [internalOrderNo, setInternalOrderNo] = useState('');
   const [internalOrders, setInternalOrders] = useState<PlacedOrder[]>([]);
   const [category, setCategory]       = useState('All');
-  const [showResetOverlay, setShowResetOverlay] = useState(false);
-  const [showStaffPinOverlay, setShowStaffPinOverlay] = useState(false);
-  const [pinInput, setPinInput]       = useState('');
-  const [pinError, setPinError]       = useState(false);
+  const [showBookingDialog, setShowBookingDialog] = useState(false);
+  const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const [staffEmail, setStaffEmail] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
   const [clock, setClock]             = useState(new Date());
   const [role, setRole]               = useState<Role>('staff');
   const [notePopupId, setNotePopupId] = useState<string | null>(null);
@@ -375,8 +446,6 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     }
   }, [live?.hideDemoToggle]);
 
-  const pinOverlayOpen = showResetOverlay || showStaffPinOverlay;
-
   const screen = live?.screen ?? internalScreen;
   const goTo = (next: Screen) => {
     if (live) live.navigate(next);
@@ -393,11 +462,48 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const orderNo = live?.orderNo ?? internalOrderNo;
   const orders = live?.orders ?? internalOrders;
   const confirmCart = live?.confirmCart ?? cart;
-  const menuSource = live?.menuItems ?? MENU;
-  const categoryList = live?.categories ?? CATEGORIES;
+  const menuSource = live ? (live.menuItems ?? []) : MENU;
+  const menuSections = live ? (live.menuSections ?? []) : [];
+  const categoryList = live ? (live.categories ?? ['All']) : CATEGORIES;
   const bookingData = live?.booking ?? MOCK_BOOKING;
   const guestDisplayName = live?.guestName ?? MOCK_BOOKING.memberName;
-  const staffPin = live?.staffPin ?? STAFF_PIN;
+
+  const menuItemSignature = live?.menuItems?.map((item) => item.id).join('|') ?? '';
+
+  useEffect(() => {
+    if (!live) return;
+    setCategory('All');
+  }, [live, menuItemSignature]);
+
+  useEffect(() => {
+    if (!live || category === 'All') return;
+    if (!categoryList.includes(category)) {
+      setCategory('All');
+    }
+  }, [live, categoryList, category]);
+
+  const filteredMenu = useMemo(() => {
+    if (category === 'All') {
+      return menuSource;
+    }
+    // Tabs are active menu section names; item.category is the section name (POS parity).
+    return menuSource.filter((item) => item.category === category);
+  }, [menuSource, category]);
+
+  const handleSuiteClick = (suiteId: string) => {
+    setSelectedSuiteId(suiteId);
+    setPendingBookingId(null);
+    if (live?.onPairSuite) {
+      setShowBookingDialog(true);
+      return;
+    }
+  };
+
+  const confirmPair = async () => {
+    if (!live?.onPairSuite || !selectedSuiteId) return;
+    await live.onPairSuite(selectedSuiteId, pendingBookingId);
+    setShowBookingDialog(false);
+  };
 
   const addItem = (item: MenuItem) => {
     if (live) {
@@ -426,7 +532,6 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
   const getQty = (id: string) => cart.find(c => c.id === id)?.qty ?? 0;
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
-  const filteredMenu = category === 'All' ? menuSource : menuSource.filter(i => i.category === category);
 
   const guestAllergens = new Set(
     bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen.toLowerCase()))
@@ -434,47 +539,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const hasAllergenWarning = (item: MenuItem) =>
     item.allergens?.some(a => guestAllergens.has(a.toLowerCase())) ?? false;
 
-  const handlePinDigit = (d: string) => {
-    const next = (pinInput + d).slice(0, 4);
-    setPinInput(next);
-    setPinError(false);
-    if (next.length === 4) {
-      setTimeout(() => {
-        if (next === staffPin) {
-          if (showStaffPinOverlay) {
-            setRole('staff');
-            live?.onStaffUnlock?.();
-            setShowStaffPinOverlay(false);
-            setPinInput('');
-            setPinError(false);
-            return;
-          }
-          if (live) {
-            live.onStaffReset();
-          } else {
-            setInternalAssignedSuite(null); setInternalSelectedSuiteId(''); setInternalCart([]);
-            setInternalOrders([]); setCategory('All'); setInternalSpecialNote('');
-            goTo('assign');
-          }
-          setShowResetOverlay(false); setPinInput('');
-        } else { setPinError(true); setPinInput(''); }
-      }, 200);
-    }
-  };
-
   const handleStaffViewToggle = () => {
-    if (role === 'staff') {
-      setRole('customer');
-      return;
-    }
-    if (live?.hideDemoToggle) {
-      setPinInput('');
-      setPinError(false);
-      setShowStaffPinOverlay(true);
-      return;
-    }
-    setRole('staff');
-    live?.onStaffUnlock?.();
+    setRole(role === 'staff' ? 'customer' : 'staff');
   };
 
   const handlePlaceOrder = async () => {
@@ -521,31 +587,15 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   return (
     <div className="fixed inset-0 overflow-hidden select-none" style={{ background: C.bg, color: C.text, fontFamily: 'system-ui, sans-serif' }}>
 
-      {/* ── Demo role toggle (always visible, above content, below overlay) ── */}
+      {/* ── Demo role toggle (figma preview only) ── */}
       {!live?.hideDemoToggle && (
-      <div className="absolute top-3 right-3 z-40 flex items-center gap-2"
-        style={{ pointerEvents: pinOverlayOpen ? 'none' : 'auto' }}>
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2">
         <span className="text-[10px] uppercase tracking-widest opacity-50 font-medium" style={{ color: C.text }}>
           Demo only
         </span>
         <button
           onClick={handleStaffViewToggle}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 shadow-sm"
-          style={role === 'staff'
-            ? { background: C.accent, color: C.bg, border: `1px solid ${C.accent}` }
-            : { background: C.bg2, color: C.textMid, border: `1px solid ${C.border}` }}>
-          <span className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: role === 'staff' ? C.bg : C.textLight }} />
-          {role === 'staff' ? 'Staff View' : 'Customer View'}
-        </button>
-      </div>
-      )}
-      {live?.hideDemoToggle && (
-      <div className="absolute top-3 right-3 z-40 flex items-center gap-2"
-        style={{ pointerEvents: pinOverlayOpen ? 'none' : 'auto' }}>
-        <button
-          onClick={handleStaffViewToggle}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 shadow-sm min-h-[44px] min-w-[44px]"
           style={role === 'staff'
             ? { background: C.accent, color: C.bg, border: `1px solid ${C.accent}` }
             : { background: C.bg2, color: C.textMid, border: `1px solid ${C.border}` }}>
@@ -617,49 +667,106 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
         })()}
       </AnimatePresence>
 
-      {/* ── Staff PIN Overlay (unlock staff view or re-assign iPad) ─────────── */}
+      {/* ── Select Booking dialog (staff assign flow) ───────────────────────── */}
       <AnimatePresence>
-        {pinOverlayOpen && (
-          <motion.div key="overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.85 }} animate={{ scale: 1 }} exit={{ scale: 0.85 }}
-              className="rounded-3xl p-8 w-80 shadow-2xl text-center"
-              style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-              <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-                style={{ background: C.accentDim }}>
-                <Lock className="w-7 h-7" style={{ color: C.accent }} />
-              </div>
-              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>
-                {showStaffPinOverlay ? 'Staff View' : 'Staff Access'}
+        {showBookingDialog && (
+          <motion.div
+            key="booking-dialog"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowBookingDialog(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="rounded-3xl p-6 w-full max-w-md shadow-2xl mx-4"
+              style={{ background: C.bg, border: `1px solid ${C.border}` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>Select Booking</p>
+              <p className="text-sm mb-4" style={{ color: C.textMid }}>
+                Link a reservation to this suite, or start as a walk-in.
               </p>
-              <p className="text-sm mb-6" style={{ color: C.textMid }}>
-                {showStaffPinOverlay
-                  ? 'Enter PIN to view guest allergies and booking details'
-                  : 'Enter PIN to re-assign this iPad'}
-              </p>
-              <div className="flex justify-center gap-3 mb-6">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className="w-4 h-4 rounded-full transition-all"
-                    style={{ background: i < pinInput.length ? (pinError ? '#ef4444' : C.accent) : C.bg2 }} />
-                ))}
+
+              <button
+                type="button"
+                onClick={() => setPendingBookingId(null)}
+                className={`w-full text-left px-4 py-3 rounded-xl border mb-3 transition-all min-h-[44px] ${
+                  pendingBookingId === null ? 'ring-2 ring-offset-1' : ''
+                }`}
+                style={{
+                  background: pendingBookingId === null ? C.accentDim : C.bg,
+                  borderColor: pendingBookingId === null ? C.accent : C.border,
+                  color: C.text,
+                }}
+              >
+                <span className="font-semibold">Walk-in (No Booking)</span>
+                <span className="block text-xs mt-0.5" style={{ color: C.textMid }}>No linked reservation</span>
+              </button>
+
+              {live?.isLoadingUnassignedBookings ? (
+                <p className="text-sm text-center py-4" style={{ color: C.textMid }}>Loading bookings…</p>
+              ) : (
+                <div className="max-h-52 overflow-y-auto space-y-2 mb-4">
+                  {(live?.unassignedBookings ?? []).map((booking) => (
+                    <button
+                      key={booking.id}
+                      type="button"
+                      onClick={() => setPendingBookingId(booking.id)}
+                      className={`w-full text-left px-4 py-3 rounded-xl border transition-all min-h-[44px] ${
+                        pendingBookingId === booking.id ? 'ring-2 ring-offset-1' : ''
+                      }`}
+                      style={{
+                        background: pendingBookingId === booking.id ? C.accentDim : C.bg,
+                        borderColor: pendingBookingId === booking.id ? C.accent : C.border,
+                        color: C.text,
+                      }}
+                    >
+                      <div className="flex justify-between gap-2">
+                        <span className="font-medium">{booking.guest_name}</span>
+                        <span className="text-xs" style={{ color: C.textMid }}>{booking.booking_number}</span>
+                      </div>
+                      <span className="text-xs block mt-0.5" style={{ color: C.textMid }}>
+                        {booking.flight_number ?? '—'}
+                        {booking.flight_time ? ` · ${booking.flight_time}` : ''}
+                        {` · ${booking.pax} pax`}
+                      </span>
+                    </button>
+                  ))}
+                  {(live?.unassignedBookings ?? []).length === 0 && (
+                    <p className="text-xs text-center py-2" style={{ color: C.textMid }}>
+                      No unassigned bookings for today.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {live?.assignError && (
+                <p className="text-sm mb-3 text-center text-red-600">{live.assignError}</p>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBookingDialog(false)}
+                  className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px]"
+                  style={btnGhost}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmPair()}
+                  disabled={live?.isAssigning}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
+                  style={btnAccent}
+                >
+                  {live?.isAssigning ? 'Assigning…' : 'Assign & Start Guest Mode'}
+                </button>
               </div>
-              {pinError && <p className="text-xs text-red-500 mb-3">Incorrect PIN. Try again.</p>}
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((d, i) => (
-                  <button key={i} onClick={() => {
-                    if (d === '⌫') { setPinInput(p => p.slice(0,-1)); setPinError(false); }
-                    else if (d) handlePinDigit(d);
-                  }} className={`h-14 rounded-xl text-lg font-medium transition-all active:scale-95 ${d === '' ? 'invisible' : ''}`}
-                    style={d ? btnGhost : undefined}>{d}</button>
-                ))}
-              </div>
-              <button onClick={() => {
-                setShowResetOverlay(false);
-                setShowStaffPinOverlay(false);
-                setPinInput('');
-                setPinError(false);
-              }}
-                className="text-sm transition-colors" style={{ color: C.textMid }}>Cancel</button>
             </motion.div>
           </motion.div>
         )}
@@ -679,16 +786,85 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
             </p>
           </div>
 
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
             <div className="w-full max-w-lg">
+              {live && !live.isStaffAuthenticated ? (
+                <div className="rounded-2xl p-6" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
+                      <Lock className="w-5 h-5" style={{ color: C.accent }} />
+                    </div>
+                    <div>
+                      <p className="font-semibold" style={{ color: C.text }}>Staff Login</p>
+                      <p className="text-xs" style={{ color: C.textMid }}>Sign in to assign this iPad</p>
+                    </div>
+                  </div>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void live.onStaffLogin?.(staffEmail.trim(), staffPassword);
+                    }}
+                    className="space-y-3"
+                  >
+                    <div>
+                      <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>Email</label>
+                      <input
+                        id="staff-login-email"
+                        type="email"
+                        autoComplete="username"
+                        value={staffEmail}
+                        onChange={(e) => setStaffEmail(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
+                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="staff-login-password" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>Password</label>
+                      <input
+                        id="staff-login-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={staffPassword}
+                        onChange={(e) => setStaffPassword(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
+                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
+                        required
+                      />
+                    </div>
+                    {live.staffAuthError && (
+                      <p className="text-sm text-red-600 text-center">{live.staffAuthError}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={live.isStaffLoggingIn}
+                      className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
+                      style={btnAccent}
+                    >
+                      {live.isStaffLoggingIn ? 'Signing in…' : 'Sign In'}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+              <>
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
                   <Tablet className="w-5 h-5" style={{ color: C.accent }} />
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="font-semibold" style={{ color: C.text }}>Assign Suite to this iPad</p>
-                  <p className="text-xs" style={{ color: C.textMid }}>Select before handing to the guest</p>
+                  <p className="text-xs" style={{ color: C.textMid }}>Tap a suite to link a booking or walk-in</p>
                 </div>
+                {live?.onStaffLogout && (
+                  <button
+                    type="button"
+                    onClick={live.onStaffLogout}
+                    className="text-xs px-3 py-1.5 rounded-lg min-h-[44px]"
+                    style={btnGhost}
+                  >
+                    Log out
+                  </button>
+                )}
               </div>
 
               <div className="rounded-2xl p-6 mb-4" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
@@ -696,28 +872,40 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   Select Suite / Lobby
                 </label>
                 {live?.isLoadingSuites ? (
-                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>Loading suites…</p>
+                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>Loading suites…</p>
                 ) : live?.suitesLoadError ? (
-                  <p className="text-sm mb-6 text-center text-red-600">{live.suitesLoadError}</p>
+                  <p className="text-sm mb-2 text-center text-red-600">{live.suitesLoadError}</p>
                 ) : suiteList.length === 0 ? (
-                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>No active suites found.</p>
+                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>No active suites found.</p>
                 ) : (
-                <div className="grid grid-cols-2 gap-2 mb-6">
+                <div className="grid grid-cols-2 gap-2">
                   {suiteList.map(s => {
                     const statusLabel = suiteStatusLabel(s.status, s.isOccupied);
-                    const isOccupied = s.isOccupied ?? statusLabel === 'Occupied';
+                    const badgeClass = suiteStatusBadgeClass(s.status, s.isOccupied);
                     return (
-                    <button key={s.id} onClick={() => setSelectedSuiteId(s.id)}
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        if (live?.onPairSuite) {
+                          handleSuiteClick(s.id);
+                          return;
+                        }
+                        setSelectedSuiteId(s.id);
+                        const found = suiteList.find((row) => row.id === s.id);
+                        if (found) {
+                          setInternalAssignedSuite(found);
+                          goTo('welcome');
+                        }
+                      }}
                       className="flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px]"
                       style={selectedSuiteId === s.id
                         ? { background: C.accentDim, borderColor: C.accent, color: C.text }
-                        : { background: C.bg, borderColor: C.border, color: C.textMid }}>
+                        : { background: C.bg, borderColor: C.border, color: C.textMid }}
+                    >
                       <div className="flex w-full items-start justify-between gap-2">
                         <span className="text-sm font-medium">{s.name}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
-                          style={isOccupied
-                            ? { background: C.accentDim, color: C.accent, border: `1px solid ${C.accent}55` }
-                            : { background: C.bg2, color: C.textLight, border: `1px solid ${C.border}` }}>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${badgeClass}`}>
                           {statusLabel}
                         </span>
                       </div>
@@ -727,27 +915,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   })}
                 </div>
                 )}
-                {live?.assignError && (
-                  <p className="text-sm mb-4 text-center text-red-600">{live.assignError}</p>
-                )}
-                <button onClick={async () => {
-                  if (live) {
-                    await live.onAssign();
-                    return;
-                  }
-                  const s = suiteList.find(s => s.id === selectedSuiteId);
-                  if (s) {
-                    setInternalAssignedSuite(s);
-                    goTo('welcome');
-                  }
-                }}
-                  disabled={!selectedSuiteId || live?.isAssigning || live?.isLoadingSuites || suiteList.length === 0}
-                  className="w-full py-4 rounded-xl font-semibold text-sm transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
-                  style={btnAccent}>
-                  {live?.isAssigning ? 'Assigning…' : 'Assign & Start Guest Mode'}
-                </button>
               </div>
               <p className="text-center text-xs" style={{ color: C.textLight }}>Staff only — guests will see the ordering screen</p>
+              </>
+              )}
             </div>
           </div>
         </div>
@@ -761,9 +932,22 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
             {/* Left — greeting */}
             <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
-              <button onClick={() => setShowResetOverlay(true)}
-                className="absolute top-4 right-4 p-2 rounded-xl transition-colors opacity-30 hover:opacity-100"
-                style={{ background: C.bg2 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (live) {
+                    live.onStaffReset();
+                    return;
+                  }
+                  setInternalAssignedSuite(null);
+                  setInternalSelectedSuiteId('');
+                  setInternalCart([]);
+                  goTo('assign');
+                }}
+                className="absolute top-4 right-4 p-2 rounded-xl transition-colors opacity-30 hover:opacity-100 min-h-[44px] min-w-[44px]"
+                style={{ background: C.bg2 }}
+                aria-label="Re-assign iPad"
+              >
                 <RotateCcw className="w-4 h-4" style={{ color: C.text }} />
               </button>
 
@@ -860,24 +1044,32 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
               {/* List */}
               <div className="flex-1 overflow-y-auto px-5 py-4" style={{ background: C.bg2 }}>
-                <div className="grid grid-cols-3 gap-3">
-                  {filteredMenu.map(item => {
+                {filteredMenu.length === 0 ? (
+                  <p className="py-10 text-center text-sm" style={{ color: C.textMid }}>
+                    {live && menuSource.length === 0
+                      ? 'No active menu is available for ordering.'
+                      : 'No menu items in this section.'}
+                  </p>
+                ) : (
+                <div key={category} className="grid grid-cols-3 gap-3">
+                  {filteredMenu.map((item) => {
                     const qty = getQty(item.id);
                     const warn = role === 'staff' && hasAllergenWarning(item);
+                    const rowKey = `${item.sectionId ?? 'all'}-${item.id}`;
                     return (
-                      <div key={item.id}
-                        className="rounded-2xl flex flex-row transition-all cursor-pointer active:scale-[0.99] overflow-hidden"
-                        onClick={() => addItem(item)}
+                      <div
+                        key={rowKey}
+                        className="rounded-2xl flex flex-row transition-all overflow-hidden relative"
                         style={{
                           background: C.bg,
                           border: `1.5px solid ${warn ? '#fca5a5' : qty > 0 ? C.accent : C.border}`,
                           boxShadow: qty > 0 ? `0 0 0 3px ${C.accent}22` : undefined,
-                        }}>
+                        }}
+                      >
 
                         {/* Square photo */}
-                        <div className="w-20 shrink-0 relative self-stretch">
-                          <img src={item.image} alt={item.name}
-                            className="w-full h-full object-cover" loading="lazy" />
+                        <div className="shrink-0 overflow-hidden relative pointer-events-none">
+                          <ProductThumbnail imageUrl={item.image} alt={item.name} variant="menu" />
                           {warn && (
                             <div className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center shadow"
                               style={{ background: '#fee2e2' }}>
@@ -887,7 +1079,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         </div>
 
                         {/* Content */}
-                        <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-between">
+                        <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-between pointer-events-none">
                           <div>
                             <p className="font-semibold text-sm leading-tight" style={{ color: C.text }}>{item.name}</p>
                             <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>{item.category}</p>
@@ -901,24 +1093,48 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         </div>
 
                         {/* Qty controls */}
-                        <div className="flex items-center pr-3 shrink-0" onClick={e => e.stopPropagation()}>
+                        <div className="relative z-10 flex items-center pr-3 shrink-0 self-center">
                           {qty === 0 ? (
-                            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
-                              onClick={() => addItem(item)}
-                              style={btnAccent}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                addItem(item);
+                              }}
+                              className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-95 min-h-[44px] min-w-[44px]"
+                              style={btnAccent}
+                              aria-label={`Add ${item.name}`}
+                            >
                               <Plus className="w-4 h-4" />
-                            </div>
+                            </button>
                           ) : (
                             <div className="flex items-center gap-1.5">
-                              <button onClick={() => removeItem(item.id)}
-                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all"
-                                style={btnGhost}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  removeItem(item.id);
+                                }}
+                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
+                                style={btnGhost}
+                                aria-label={`Remove ${item.name}`}
+                              >
                                 <Minus className="w-3.5 h-3.5" />
                               </button>
                               <span className="text-sm font-bold w-5 text-center" style={{ color: C.text }}>{qty}</span>
-                              <button onClick={() => addItem(item)}
-                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all"
-                                style={btnAccent}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  addItem(item);
+                                }}
+                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
+                                style={btnAccent}
+                                aria-label={`Add another ${item.name}`}
+                              >
                                 <Plus className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -928,6 +1144,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     );
                   })}
                 </div>
+                )}
               </div>
 
               {/* Sticky cart bar */}
@@ -972,6 +1189,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   style={{ background: C.bg, border: `1px solid ${item.customNote ? C.accent : C.border}` }}>
                   {/* Main row */}
                   <div className="flex items-center gap-3 px-4 py-3">
+                    <ProductThumbnail imageUrl={item.image} alt={item.name} variant="cart" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm" style={{ color: C.text }}>{item.name}</p>
                       <p className="text-xs" style={{ color: C.textMid }}>{item.category}</p>
