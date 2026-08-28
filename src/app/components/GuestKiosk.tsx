@@ -37,7 +37,7 @@ interface GuestProfile {
   allergies: { allergen: string; severity: 'Mild' | 'Moderate' | 'Severe'; note: string }[];
   dietary: string[];
 }
-interface KioskBooking {
+interface MockKioskBooking {
   bookingNo: string;
   memberName: string;
   accountNo: string;
@@ -52,7 +52,7 @@ interface KioskBooking {
   paymentMode: string;
   guestProfiles: GuestProfile[];
 }
-const MOCK_BOOKING: KioskBooking = {
+const MOCK_BOOKING: MockKioskBooking = {
   bookingNo: 'A-202603-000001',
   memberName: 'John Smith',
   accountNo: 'ACC-2024-1001',
@@ -85,7 +85,6 @@ const MOCK_BOOKING: KioskBooking = {
 // ── Menu catalogue ─────────────────────────────────────────────────────────────
 const IMG = (id: string) => `https://images.unsplash.com/${id}?w=480&h=320&fit=crop&crop=center&q=75`;
 
-interface MenuItem { id: string; name: string; category: string; description: string; image: string; allergens?: string[] }
 const MENU: MenuItem[] = [
   // ── Coffee ──
   { id: 'coffee-1', name: 'Latte',               category: 'Coffee',      description: 'Classic espresso with steamed milk',       image: IMG('photo-1506372023823-741c83b836fe'), allergens: ['Dairy'] },
@@ -159,10 +158,62 @@ const MENU: MenuItem[] = [
 const CATEGORIES = ['All', ...Array.from(new Set(MENU.map(i => i.category)))];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface CartItem extends MenuItem { qty: number; customNote?: string }
-interface PlacedOrder { orderNo: string; placedAt: Date; items: CartItem[]; note: string }
-type Screen = 'assign' | 'welcome' | 'menu' | 'cart' | 'confirm' | 'history';
+export interface MenuItem { id: string; name: string; category: string; description: string; image: string; allergens?: string[] }
+interface CartItem extends MenuItem { qty: number; customNote?: string; kitchenStatus?: string }
+export interface PlacedOrder { orderNo: string; placedAt: Date; items: CartItem[]; note: string }
+export type KioskScreen = 'assign' | 'welcome' | 'menu' | 'cart' | 'confirm' | 'history';
+type Screen = KioskScreen;
 type Role = 'staff' | 'customer';
+
+export interface KioskBooking {
+  bookingNo: string;
+  memberName: string;
+  accountNo: string;
+  membershipTier: string;
+  accountType: string;
+  companyName?: string;
+  checkInTime: string;
+  flightNo: string;
+  flightTime: string;
+  flightDestination: string;
+  numberOfGuests: number;
+  paymentMode: string;
+  guestProfiles: GuestProfile[];
+}
+
+export interface GuestKioskLiveConfig {
+  screen: Screen;
+  navigate: (screen: Screen) => void;
+  suites: { id: string; name: string; kind: string }[];
+  selectedSuiteId: string;
+  onSelectSuite: (id: string) => void;
+  onAssign: () => void | Promise<void>;
+  isAssigning?: boolean;
+  isLoadingSuites?: boolean;
+  assignError?: string | null;
+  submitError?: string | null;
+  assignedSuite: { name: string; kind: string } | null;
+  guestName: string;
+  menuItems: MenuItem[];
+  categories: string[];
+  cart: CartItem[];
+  onAddItem: (item: MenuItem) => void;
+  onRemoveItem: (id: string) => void;
+  onRemoveLine?: (id: string) => void;
+  onUpdateItemNote: (id: string, note: string) => void;
+  specialNote: string;
+  onSpecialNoteChange: (note: string) => void;
+  onPlaceOrder: () => void | Promise<void>;
+  isSubmitting?: boolean;
+  orderNo: string;
+  orders: PlacedOrder[];
+  confirmCart?: CartItem[];
+  booking: KioskBooking | null;
+  staffPin: string;
+  onStaffReset: () => void;
+  onStaffUnlock?: () => void;
+  hideDemoToggle?: boolean;
+}
 
 const STAFF_PIN = '1234';
 
@@ -180,7 +231,7 @@ function KioskHeader({ subtitle }: { subtitle?: string }) {
 }
 
 // ── Info panel (shared between welcome & menu screens) ─────────────────────────
-function InfoPanel() {
+function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
   return (
     <div className="w-72 flex flex-col overflow-y-auto shrink-0 border-l" style={{ borderColor: C.border, background: C.bg2 }}>
 
@@ -192,20 +243,20 @@ function InfoPanel() {
         </div>
         <div className="flex items-start justify-between gap-2 mb-2">
           <div>
-            <p className="text-sm font-semibold" style={{ color: C.text }}>{MOCK_BOOKING.memberName}</p>
-            <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{MOCK_BOOKING.accountNo}</p>
-            {MOCK_BOOKING.companyName && (
-              <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{MOCK_BOOKING.companyName}</p>
+            <p className="text-sm font-semibold" style={{ color: C.text }}>{booking.memberName}</p>
+            <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{booking.accountNo}</p>
+            {booking.companyName && (
+              <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{booking.companyName}</p>
             )}
           </div>
           <span className="text-xs px-2 py-1 rounded-full border font-medium shrink-0"
             style={{ background: C.accentDim, color: C.accent, borderColor: C.accent + '55' }}>
-            {MOCK_BOOKING.membershipTier}
+            {booking.membershipTier}
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs" style={{ color: C.textLight }}>
           <CreditCard className="w-3 h-3" />
-          {MOCK_BOOKING.paymentMode} · {MOCK_BOOKING.accountType}
+          {booking.paymentMode} · {booking.accountType}
         </div>
       </div>
 
@@ -215,14 +266,14 @@ function InfoPanel() {
           <MapPin className="w-3.5 h-3.5" style={{ color: C.textMid }} />
           <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>Booking</span>
         </div>
-        <p className="text-xs font-mono font-semibold mb-3" style={{ color: C.accent }}>{MOCK_BOOKING.bookingNo}</p>
+        <p className="text-xs font-mono font-semibold mb-3" style={{ color: C.accent }}>{booking.bookingNo}</p>
         <div className="space-y-2">
           {[
-            { icon: Clock,  label: 'Check-in',    val: MOCK_BOOKING.checkInTime },
-            { icon: Users,  label: 'Guests',       val: `${MOCK_BOOKING.numberOfGuests} pax` },
-            { icon: Plane,  label: 'Flight',        val: MOCK_BOOKING.flightNo },
-            { icon: null,   label: 'Departure',    val: MOCK_BOOKING.flightTime },
-            { icon: null,   label: 'Destination',  val: MOCK_BOOKING.flightDestination },
+            { icon: Clock,  label: 'Check-in',    val: booking.checkInTime },
+            { icon: Users,  label: 'Guests',       val: `${booking.numberOfGuests} pax` },
+            { icon: Plane,  label: 'Flight',        val: booking.flightNo },
+            { icon: null,   label: 'Departure',    val: booking.flightTime },
+            { icon: null,   label: 'Destination',  val: booking.flightDestination },
           ].map(({ icon: Icon, label, val }) => (
             <div key={label} className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5" style={{ color: C.textMid }}>
@@ -241,7 +292,7 @@ function InfoPanel() {
           <span className="text-xs uppercase tracking-wider text-red-500">Allergies & Dietary</span>
         </div>
         <div className="space-y-3">
-          {MOCK_BOOKING.guestProfiles.map((guest, i) =>
+          {booking.guestProfiles.map((guest, i) =>
             (guest.allergies.length > 0 || guest.dietary.length > 0) ? (
               <div key={i} className="rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center justify-between mb-2">
@@ -280,16 +331,17 @@ function InfoPanel() {
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
-export function GuestKiosk() {
-  const [screen, setScreen]           = useState<Screen>('assign');
-  const [assignedSuite, setAssignedSuite] = useState<typeof SUITES[0] | null>(null);
-  const [selectedSuiteId, setSelectedSuiteId] = useState('');
-  const [cart, setCart]               = useState<CartItem[]>([]);
+export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
+  const [internalScreen, setInternalScreen] = useState<Screen>('assign');
+  const [internalAssignedSuite, setInternalAssignedSuite] = useState<typeof SUITES[0] | null>(null);
+  const [internalSelectedSuiteId, setInternalSelectedSuiteId] = useState('');
+  const [internalCart, setInternalCart] = useState<CartItem[]>([]);
+  const [internalSpecialNote, setInternalSpecialNote] = useState('');
+  const [internalOrderNo, setInternalOrderNo] = useState('');
+  const [internalOrders, setInternalOrders] = useState<PlacedOrder[]>([]);
   const [category, setCategory]       = useState('All');
-  const [specialNote, setSpecialNote] = useState('');
-  const [orderNo, setOrderNo]         = useState('');
-  const [orders, setOrders]           = useState<PlacedOrder[]>([]);
   const [showResetOverlay, setShowResetOverlay] = useState(false);
+  const [showStaffPinOverlay, setShowStaffPinOverlay] = useState(false);
   const [pinInput, setPinInput]       = useState('');
   const [pinError, setPinError]       = useState(false);
   const [clock, setClock]             = useState(new Date());
@@ -303,27 +355,67 @@ export function GuestKiosk() {
     return () => clearInterval(t);
   }, []);
 
-  const addItem = (item: MenuItem) =>
-    setCart(prev => {
+  useEffect(() => {
+    if (live?.hideDemoToggle) {
+      setRole('customer');
+    }
+  }, [live?.hideDemoToggle]);
+
+  const pinOverlayOpen = showResetOverlay || showStaffPinOverlay;
+
+  const screen = live?.screen ?? internalScreen;
+  const goTo = (next: Screen) => {
+    if (live) live.navigate(next);
+    else setInternalScreen(next);
+  };
+
+  const suiteList = live?.suites ?? SUITES;
+  const selectedSuiteId = live?.selectedSuiteId ?? internalSelectedSuiteId;
+  const setSelectedSuiteId = live?.onSelectSuite ?? setInternalSelectedSuiteId;
+  const assignedSuite = live?.assignedSuite ?? internalAssignedSuite;
+  const cart = live?.cart ?? internalCart;
+  const specialNote = live?.specialNote ?? internalSpecialNote;
+  const setSpecialNote = live?.onSpecialNoteChange ?? setInternalSpecialNote;
+  const orderNo = live?.orderNo ?? internalOrderNo;
+  const orders = live?.orders ?? internalOrders;
+  const confirmCart = live?.confirmCart ?? cart;
+  const menuSource = live?.menuItems ?? MENU;
+  const categoryList = live?.categories ?? CATEGORIES;
+  const bookingData = live?.booking ?? MOCK_BOOKING;
+  const guestDisplayName = live?.guestName ?? MOCK_BOOKING.memberName;
+  const staffPin = live?.staffPin ?? STAFF_PIN;
+
+  const addItem = (item: MenuItem) => {
+    if (live) {
+      live.onAddItem(item);
+      return;
+    }
+    setInternalCart(prev => {
       const ex = prev.find(c => c.id === item.id);
       return ex ? prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c)
                 : [...prev, { ...item, qty: 1 }];
     });
+  };
 
-  const removeItem = (id: string) =>
-    setCart(prev => {
+  const removeItem = (id: string) => {
+    if (live) {
+      live.onRemoveItem(id);
+      return;
+    }
+    setInternalCart(prev => {
       const ex = prev.find(c => c.id === id);
       if (!ex) return prev;
       return ex.qty === 1 ? prev.filter(c => c.id !== id)
                           : prev.map(c => c.id === id ? { ...c, qty: c.qty - 1 } : c);
     });
+  };
 
   const getQty = (id: string) => cart.find(c => c.id === id)?.qty ?? 0;
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
-  const filteredMenu = category === 'All' ? MENU : MENU.filter(i => i.category === category);
+  const filteredMenu = category === 'All' ? menuSource : menuSource.filter(i => i.category === category);
 
   const guestAllergens = new Set(
-    MOCK_BOOKING.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen.toLowerCase()))
+    bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen.toLowerCase()))
   );
   const hasAllergenWarning = (item: MenuItem) =>
     item.allergens?.some(a => guestAllergens.has(a.toLowerCase())) ?? false;
@@ -334,20 +426,52 @@ export function GuestKiosk() {
     setPinError(false);
     if (next.length === 4) {
       setTimeout(() => {
-        if (next === STAFF_PIN) {
-          setAssignedSuite(null); setSelectedSuiteId(''); setCart([]);
-          setOrders([]); setCategory('All'); setSpecialNote('');
-          setScreen('assign'); setShowResetOverlay(false); setPinInput('');
+        if (next === staffPin) {
+          if (showStaffPinOverlay) {
+            setRole('staff');
+            live?.onStaffUnlock?.();
+            setShowStaffPinOverlay(false);
+            setPinInput('');
+            setPinError(false);
+            return;
+          }
+          if (live) {
+            live.onStaffReset();
+          } else {
+            setInternalAssignedSuite(null); setInternalSelectedSuiteId(''); setInternalCart([]);
+            setInternalOrders([]); setCategory('All'); setInternalSpecialNote('');
+            goTo('assign');
+          }
+          setShowResetOverlay(false); setPinInput('');
         } else { setPinError(true); setPinInput(''); }
       }, 200);
     }
   };
 
-  const handlePlaceOrder = () => {
+  const handleStaffViewToggle = () => {
+    if (role === 'staff') {
+      setRole('customer');
+      return;
+    }
+    if (live?.hideDemoToggle) {
+      setPinInput('');
+      setPinError(false);
+      setShowStaffPinOverlay(true);
+      return;
+    }
+    setRole('staff');
+    live?.onStaffUnlock?.();
+  };
+
+  const handlePlaceOrder = async () => {
+    if (live) {
+      await live.onPlaceOrder();
+      return;
+    }
     const no = `ORD-${Date.now().toString().slice(-6)}`;
-    setOrders(prev => [{ orderNo: no, placedAt: new Date(), items: cart, note: specialNote }, ...prev]);
-    setOrderNo(no);
-    setScreen('confirm');
+    setInternalOrders(prev => [{ orderNo: no, placedAt: new Date(), items: cart, note: specialNote }, ...prev]);
+    setInternalOrderNo(no);
+    goTo('confirm');
   };
 
   const openNotePopup = (item: CartItem) => {
@@ -358,12 +482,23 @@ export function GuestKiosk() {
 
   const saveNote = () => {
     if (!notePopupId) return;
-    setCart(prev => prev.map(c => c.id === notePopupId ? { ...c, customNote: noteDraft.trim() || undefined } : c));
+    if (live) {
+      live.onUpdateItemNote(notePopupId, noteDraft);
+    } else {
+      setInternalCart(prev => prev.map(c => c.id === notePopupId ? { ...c, customNote: noteDraft.trim() || undefined } : c));
+    }
     setNotePopupId(null);
   };
 
-  const timeStr = clock.toLocaleTimeString('en-HK', { hour: '2-digit', minute: '2-digit' });
   const dateStr = clock.toLocaleDateString('en-HK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const kitchenStatusStyle = (status?: string) => {
+    const normalized = (status ?? '').toLowerCase();
+    if (normalized === 'served') return { color: '#16a34a' };
+    if (normalized === 'preparing') return { color: '#2563eb' };
+    if (normalized === 'pending') return { color: '#ca8a04' };
+    return { color: C.textMid };
+  };
 
   // ── Shared button styles ──
   const btnAccent = { background: C.accent, color: C.bg } as React.CSSProperties;
@@ -373,13 +508,14 @@ export function GuestKiosk() {
     <div className="fixed inset-0 overflow-hidden select-none" style={{ background: C.bg, color: C.text, fontFamily: 'system-ui, sans-serif' }}>
 
       {/* ── Demo role toggle (always visible, above content, below overlay) ── */}
+      {!live?.hideDemoToggle && (
       <div className="absolute top-3 right-3 z-40 flex items-center gap-2"
-        style={{ pointerEvents: showResetOverlay ? 'none' : 'auto' }}>
+        style={{ pointerEvents: pinOverlayOpen ? 'none' : 'auto' }}>
         <span className="text-[10px] uppercase tracking-widest opacity-50 font-medium" style={{ color: C.text }}>
           Demo only
         </span>
         <button
-          onClick={() => setRole(r => r === 'staff' ? 'customer' : 'staff')}
+          onClick={handleStaffViewToggle}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 shadow-sm"
           style={role === 'staff'
             ? { background: C.accent, color: C.bg, border: `1px solid ${C.accent}` }
@@ -389,6 +525,22 @@ export function GuestKiosk() {
           {role === 'staff' ? 'Staff View' : 'Customer View'}
         </button>
       </div>
+      )}
+      {live?.hideDemoToggle && (
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2"
+        style={{ pointerEvents: pinOverlayOpen ? 'none' : 'auto' }}>
+        <button
+          onClick={handleStaffViewToggle}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 shadow-sm min-h-[44px] min-w-[44px]"
+          style={role === 'staff'
+            ? { background: C.accent, color: C.bg, border: `1px solid ${C.accent}` }
+            : { background: C.bg2, color: C.textMid, border: `1px solid ${C.border}` }}>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ background: role === 'staff' ? C.bg : C.textLight }} />
+          {role === 'staff' ? 'Staff View' : 'Customer View'}
+        </button>
+      </div>
+      )}
 
       {/* ── Item Custom Note Popup ──────────────────────────────────────────── */}
       <AnimatePresence>
@@ -451,9 +603,9 @@ export function GuestKiosk() {
         })()}
       </AnimatePresence>
 
-      {/* ── Staff Reset Overlay ──────────────────────────────────────────────── */}
+      {/* ── Staff PIN Overlay (unlock staff view or re-assign iPad) ─────────── */}
       <AnimatePresence>
-        {showResetOverlay && (
+        {pinOverlayOpen && (
           <motion.div key="overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
             <motion.div initial={{ scale: 0.85 }} animate={{ scale: 1 }} exit={{ scale: 0.85 }}
@@ -463,8 +615,14 @@ export function GuestKiosk() {
                 style={{ background: C.accentDim }}>
                 <Lock className="w-7 h-7" style={{ color: C.accent }} />
               </div>
-              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>Staff Access</p>
-              <p className="text-sm mb-6" style={{ color: C.textMid }}>Enter PIN to re-assign this iPad</p>
+              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>
+                {showStaffPinOverlay ? 'Staff View' : 'Staff Access'}
+              </p>
+              <p className="text-sm mb-6" style={{ color: C.textMid }}>
+                {showStaffPinOverlay
+                  ? 'Enter PIN to view guest allergies and booking details'
+                  : 'Enter PIN to re-assign this iPad'}
+              </p>
               <div className="flex justify-center gap-3 mb-6">
                 {[0,1,2,3].map(i => (
                   <div key={i} className="w-4 h-4 rounded-full transition-all"
@@ -481,7 +639,12 @@ export function GuestKiosk() {
                     style={d ? btnGhost : undefined}>{d}</button>
                 ))}
               </div>
-              <button onClick={() => { setShowResetOverlay(false); setPinInput(''); setPinError(false); }}
+              <button onClick={() => {
+                setShowResetOverlay(false);
+                setShowStaffPinOverlay(false);
+                setPinInput('');
+                setPinError(false);
+              }}
                 className="text-sm transition-colors" style={{ color: C.textMid }}>Cancel</button>
             </motion.div>
           </motion.div>
@@ -518,10 +681,15 @@ export function GuestKiosk() {
                 <label className="text-xs uppercase tracking-wider block mb-3" style={{ color: C.textMid }}>
                   Select Suite / Lobby
                 </label>
+                {live?.isLoadingSuites ? (
+                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>Loading occupied suites…</p>
+                ) : suiteList.length === 0 ? (
+                  <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>No occupied suites available.</p>
+                ) : (
                 <div className="grid grid-cols-2 gap-2 mb-6">
-                  {SUITES.map(s => (
+                  {suiteList.map(s => (
                     <button key={s.id} onClick={() => setSelectedSuiteId(s.id)}
-                      className="flex flex-col items-start gap-0.5 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98]"
+                      className="flex flex-col items-start gap-0.5 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px]"
                       style={selectedSuiteId === s.id
                         ? { background: C.accentDim, borderColor: C.accent, color: C.text }
                         : { background: C.bg, borderColor: C.border, color: C.textMid }}>
@@ -530,11 +698,25 @@ export function GuestKiosk() {
                     </button>
                   ))}
                 </div>
-                <button onClick={() => { const s = SUITES.find(s => s.id === selectedSuiteId); if(s){ setAssignedSuite(s); setScreen('welcome'); } }}
-                  disabled={!selectedSuiteId}
-                  className="w-full py-4 rounded-xl font-semibold text-sm transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                )}
+                {live?.assignError && (
+                  <p className="text-sm mb-4 text-center text-red-600">{live.assignError}</p>
+                )}
+                <button onClick={async () => {
+                  if (live) {
+                    await live.onAssign();
+                    return;
+                  }
+                  const s = suiteList.find(s => s.id === selectedSuiteId);
+                  if (s) {
+                    setInternalAssignedSuite(s);
+                    goTo('welcome');
+                  }
+                }}
+                  disabled={!selectedSuiteId || live?.isAssigning || live?.isLoadingSuites || suiteList.length === 0}
+                  className="w-full py-4 rounded-xl font-semibold text-sm transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
                   style={btnAccent}>
-                  Assign & Start Guest Mode
+                  {live?.isAssigning ? 'Assigning…' : 'Assign & Start Guest Mode'}
                 </button>
               </div>
               <p className="text-center text-xs" style={{ color: C.textLight }}>Staff only — guests will see the ordering screen</p>
@@ -569,11 +751,11 @@ export function GuestKiosk() {
               </div>
 
               <h1 className="text-5xl mb-2 text-center" style={{ fontWeight: 300, color: C.text }}>
-                Welcome, {MOCK_BOOKING.memberName.split(' ')[0]}
+                Welcome, {guestDisplayName.split(' ')[0]}
               </h1>
               <p className="text-base mb-10" style={{ color: C.textMid }}>to HKIA VIP Lounge</p>
 
-              <button onClick={() => setScreen('menu')}
+              <button onClick={() => goTo('menu')}
                 className="px-12 py-5 rounded-2xl font-semibold text-lg transition-all active:scale-[0.97] shadow-lg mb-4"
                 style={{ ...btnAccent, boxShadow: `0 8px 24px ${C.accent}44` }}>
                 <span className="flex items-center gap-2">
@@ -582,7 +764,7 @@ export function GuestKiosk() {
                 </span>
               </button>
 
-              <button onClick={() => setScreen('history')}
+              <button onClick={() => goTo('history')}
                 className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm transition-all active:scale-[0.97]"
                 style={btnGhost}>
                 <History className="w-4 h-4" />
@@ -590,7 +772,8 @@ export function GuestKiosk() {
               </button>
             </div>
 
-            {role === 'staff' && <InfoPanel />}
+            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} />}
+            {role === 'staff' && !live && <InfoPanel />}
           </div>
         </div>
       )}
@@ -607,13 +790,13 @@ export function GuestKiosk() {
               {/* Toolbar */}
               <div className="flex items-center justify-between px-5 py-3 border-b shrink-0"
                 style={{ borderColor: C.border, background: C.bg }}>
-                <button onClick={() => setScreen('welcome')}
+                <button onClick={() => goTo('welcome')}
                   className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
                   style={btnGhost}>
                   <ChevronLeft className="w-4 h-4" /> Back
                 </button>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setScreen('history')}
+                  <button onClick={() => goTo('history')}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all"
                     style={btnGhost}>
                     <History className="w-4 h-4" />
@@ -623,7 +806,7 @@ export function GuestKiosk() {
                         style={{ background: C.accent, color: C.bg }}>{orders.length}</span>
                     )}
                   </button>
-                  <button onClick={() => cartCount > 0 && setScreen('cart')}
+                  <button onClick={() => cartCount > 0 && goTo('cart')}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all"
                     style={cartCount > 0 ? btnAccent : { ...btnGhost, opacity: 0.5, cursor: 'default' }}>
                     <ShoppingCart className="w-4 h-4" />
@@ -638,7 +821,7 @@ export function GuestKiosk() {
 
               {/* Category tabs */}
               <div className="flex gap-2 px-5 py-3 overflow-x-auto shrink-0 border-b" style={{ borderColor: C.border, background: C.bg }}>
-                {CATEGORIES.map(cat => (
+                {categoryList.map(cat => (
                   <button key={cat} onClick={() => setCategory(cat)}
                     className="px-4 py-2 rounded-xl text-sm whitespace-nowrap transition-all shrink-0 font-medium"
                     style={category === cat ? btnAccent : { background: C.bg2, color: C.textMid, border: `1px solid ${C.border}` }}>
@@ -722,7 +905,7 @@ export function GuestKiosk() {
               {/* Sticky cart bar */}
               {cartCount > 0 && (
                 <div className="px-5 pb-5 pt-3 shrink-0 border-t" style={{ borderColor: C.border, background: C.bg }}>
-                  <button onClick={() => setScreen('cart')}
+                  <button onClick={() => goTo('cart')}
                     className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg"
                     style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
                     <ShoppingCart className="w-5 h-5" />
@@ -732,7 +915,8 @@ export function GuestKiosk() {
               )}
             </div>
 
-            {role === 'staff' && <InfoPanel />}
+            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} />}
+            {role === 'staff' && !live && <InfoPanel />}
           </div>
         </div>
       )}
@@ -743,7 +927,7 @@ export function GuestKiosk() {
           <KioskHeader subtitle={assignedSuite?.name} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border }}>
-            <button onClick={() => setScreen('menu')}
+            <button onClick={() => goTo('menu')}
               className="p-2 rounded-xl transition-colors" style={btnGhost}>
               <ChevronLeft className="w-5 h-5" />
             </button>
@@ -786,7 +970,14 @@ export function GuestKiosk() {
                         <Plus className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <button onClick={() => setCart(c => c.filter(x => x.id !== item.id))}
+                    <button onClick={() => {
+                      if (live?.onRemoveLine) live.onRemoveLine(item.id);
+                      else if (live) {
+                        for (let i = 0; i < item.qty; i++) live.onRemoveItem(item.id);
+                      } else {
+                        setInternalCart(c => c.filter(x => x.id !== item.id));
+                      }
+                    }}
                       className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-50 hover:text-red-500"
                       style={{ color: C.textLight }}>
                       <X className="w-4 h-4" />
@@ -818,10 +1009,14 @@ export function GuestKiosk() {
           </div>
 
           <div className="px-6 pb-5 pt-3 shrink-0 border-t" style={{ borderColor: C.border, background: C.bg }}>
+            {live?.submitError && (
+              <p className="text-sm text-red-600 text-center mb-3">{live.submitError}</p>
+            )}
             <button onClick={handlePlaceOrder}
-              className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] shadow-lg"
+              disabled={live?.isSubmitting}
+              className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] shadow-lg disabled:opacity-60"
               style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
-              Place Order
+              {live?.isSubmitting ? 'Submitting…' : 'Place Order'}
             </button>
           </div>
         </div>
@@ -856,7 +1051,7 @@ export function GuestKiosk() {
 
               <div className="rounded-2xl p-4 mb-8 text-left max-w-sm mx-auto"
                 style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-                {cart.map(item => (
+                {confirmCart.map(item => (
                   <div key={item.id} className="flex justify-between text-sm py-1" style={{ color: C.textMid }}>
                     <span>{item.name}</span>
                     <span>× {item.qty}</span>
@@ -865,13 +1060,13 @@ export function GuestKiosk() {
               </div>
 
               <div className="flex gap-3 justify-center">
-                <button onClick={() => { setCart([]); setCategory('All'); setSpecialNote(''); setScreen('menu'); }}
+                <button onClick={() => { if (!live) { setInternalCart([]); setCategory('All'); setInternalSpecialNote(''); } goTo('menu'); }}
                   className="flex items-center gap-2 px-8 py-4 rounded-2xl font-semibold transition-all active:scale-[0.97] shadow-lg"
                   style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
                   <Utensils className="w-4 h-4" />
                   Order More
                 </button>
-                <button onClick={() => setScreen('history')}
+                <button onClick={() => goTo('history')}
                   className="flex items-center gap-2 px-8 py-4 rounded-2xl font-medium transition-all active:scale-[0.97]"
                   style={btnGhost}>
                   <History className="w-4 h-4" />
@@ -889,7 +1084,7 @@ export function GuestKiosk() {
           <KioskHeader />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
-            <button onClick={() => setScreen('menu')} className="p-2 rounded-xl transition-colors" style={btnGhost}>
+            <button onClick={() => goTo('menu')} className="p-2 rounded-xl transition-colors" style={btnGhost}>
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div>
@@ -935,16 +1130,28 @@ export function GuestKiosk() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-green-600">
-                        <CheckCircle className="w-3 h-3" /> Confirmed
+                      <div className="flex items-center gap-1.5 text-xs" style={kitchenStatusStyle(order.items[0]?.kitchenStatus)}>
+                        <CheckCircle className="w-3 h-3" />
+                        {order.items.every(i => (i.kitchenStatus ?? '').toLowerCase() === 'served')
+                          ? 'Served'
+                          : order.items.some(i => (i.kitchenStatus ?? '').toLowerCase() === 'preparing')
+                            ? 'Preparing'
+                            : 'Pending'}
                       </div>
                     </div>
                     <div className="px-5 py-3 space-y-2">
                       {order.items.map(item => (
                         <div key={item.id}>
-                          <div className="flex items-center justify-between text-sm">
+                          <div className="flex items-center justify-between text-sm gap-2">
                             <span style={{ color: C.textMid }}>{item.name}</span>
-                            <span style={{ color: C.textLight }}>× {item.qty}</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {item.kitchenStatus && (
+                                <span className="text-[10px] font-medium" style={kitchenStatusStyle(item.kitchenStatus)}>
+                                  {item.kitchenStatus}
+                                </span>
+                              )}
+                              <span style={{ color: C.textLight }}>× {item.qty}</span>
+                            </div>
                           </div>
                           {item.customNote && (
                             <div className="flex items-start gap-1 mt-0.5 ml-1">
@@ -967,7 +1174,7 @@ export function GuestKiosk() {
           </div>
 
           <div className="px-6 pb-5 pt-3 shrink-0 border-t" style={{ borderColor: C.border, background: C.bg }}>
-            <button onClick={() => setScreen('menu')}
+            <button onClick={() => goTo('menu')}
               className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] shadow-lg"
               style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
               <span className="flex items-center justify-center gap-2">
