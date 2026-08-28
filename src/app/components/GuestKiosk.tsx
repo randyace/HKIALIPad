@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
@@ -158,7 +158,34 @@ const MENU: MenuItem[] = [
 const CATEGORIES = ['All', ...Array.from(new Set(MENU.map(i => i.category)))];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-export interface MenuItem { id: string; name: string; category: string; description: string; image: string; allergens?: string[]; sectionId?: number }
+export interface SelectedMenuOption {
+  optionId: number;
+  name: string;
+  groupName: string;
+}
+
+export interface MenuOptionGroup {
+  id: number;
+  name: string;
+  nameEn?: string;
+  nameZh?: string;
+  selectionType: 'single' | 'multiple';
+  isRequired: boolean;
+  options: { id: number; name: string; nameEn?: string; nameZh?: string }[];
+}
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  image: string;
+  allergens?: string[];
+  dietaryTags?: string[];
+  optionGroups?: MenuOptionGroup[];
+  sectionId?: number;
+  selectedOptions?: SelectedMenuOption[];
+}
 interface CartItem extends MenuItem { qty: number; customNote?: string; kitchenStatus?: string }
 export interface PlacedOrder { orderNo: string; placedAt: Date; items: CartItem[]; note: string }
 export type KioskScreen = 'assign' | 'welcome' | 'menu' | 'cart' | 'confirm' | 'history';
@@ -209,11 +236,15 @@ export interface GuestKioskLiveConfig {
   onStaffLogout?: () => void;
   assignedSuite: { name: string; kind: string } | null;
   guestName: string;
+  guestAllergies?: string[];
+  t?: (key: string) => string;
+  headerLanguageSwitcher?: ReactNode;
+  welcomeLanguageSwitcher?: ReactNode;
   menuItems: MenuItem[];
   menuSections?: Array<{ id: number; name: string }>;
   categories: string[];
   cart: CartItem[];
-  onAddItem: (item: MenuItem) => void;
+  onAddItem: (item: MenuItem, selectedOptions?: SelectedMenuOption[]) => void;
   onRemoveItem: (id: string) => void;
   onRemoveLine?: (id: string) => void;
   onUpdateItemNote: (id: string, note: string) => void;
@@ -303,9 +334,20 @@ function ProductThumbnail({
 }
 
 // ── Shared header component ────────────────────────────────────────────────────
-function KioskHeader({ subtitle }: { subtitle?: string }) {
+function KioskHeader({
+  subtitle,
+  languageSwitcher,
+}: {
+  subtitle?: string;
+  languageSwitcher?: ReactNode;
+}) {
   return (
-    <div className="flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
+    <div className="relative flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
+      {languageSwitcher && (
+        <div className="absolute top-4 right-4 z-10">
+          {languageSwitcher}
+        </div>
+      )}
       <img src={logoImg} alt="HKIA VIP Lounge" className="h-10 mb-2" />
       
       {subtitle && (
@@ -415,6 +457,171 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
   );
 }
 
+function buildCartLineId(item: MenuItem, selectedOptions?: SelectedMenuOption[]): string {
+  if (!selectedOptions?.length) {
+    return item.id;
+  }
+  const optionIds = [...selectedOptions].map((option) => option.optionId).sort((a, b) => a - b);
+  return `${item.id}-${optionIds.join('-')}`;
+}
+
+function ItemOptionsModal({
+  item,
+  t,
+  onClose,
+  onConfirm,
+}: {
+  item: MenuItem;
+  t: (key: string) => string;
+  onClose: () => void;
+  onConfirm: (selectedOptions: SelectedMenuOption[]) => void;
+}) {
+  const groups = item.optionGroups ?? [];
+  const [selectedByGroup, setSelectedByGroup] = useState<Record<number, number[]>>(() => {
+    const initial: Record<number, number[]> = {};
+    for (const group of groups) {
+      initial[group.id] = [];
+    }
+    return initial;
+  });
+
+  const toggleOption = (group: MenuOptionGroup, optionId: number) => {
+    setSelectedByGroup((prev) => {
+      const current = prev[group.id] ?? [];
+      if (group.selectionType === 'single') {
+        return { ...prev, [group.id]: [optionId] };
+      }
+      return current.includes(optionId)
+        ? { ...prev, [group.id]: current.filter((id) => id !== optionId) }
+        : { ...prev, [group.id]: [...current, optionId] };
+    });
+  };
+
+  const isValid = groups.every((group) => {
+    const count = selectedByGroup[group.id]?.length ?? 0;
+    if (group.isRequired) {
+      return count > 0;
+    }
+    return true;
+  });
+
+  const handleConfirm = () => {
+    const selectedOptions: SelectedMenuOption[] = [];
+    for (const group of groups) {
+      const optionIds = selectedByGroup[group.id] ?? [];
+      for (const optionId of optionIds) {
+        const option = group.options.find((entry) => entry.id === optionId);
+        if (option) {
+          selectedOptions.push({
+            optionId: option.id,
+            name: option.name,
+            groupName: group.name,
+          });
+        }
+      }
+    }
+    onConfirm(selectedOptions);
+  };
+
+  return (
+    <motion.div
+      key="options-modal"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 12 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.88, y: 12 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+        className="rounded-3xl p-7 w-[420px] max-h-[80vh] overflow-y-auto shadow-2xl"
+        style={{ background: C.bg, border: `1px solid ${C.border}` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <p className="font-semibold" style={{ color: C.text }}>{item.name}</p>
+            <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{item.category}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
+            style={{ color: C.textLight, background: C.bg2 }}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5 mb-6">
+          {groups.map((group) => (
+            <div key={group.id}>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-semibold" style={{ color: C.text }}>{group.name}</p>
+                {group.isRequired && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                    {t('options.required')}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs mb-2" style={{ color: C.textMid }}>
+                {group.selectionType === 'single' ? t('options.selectOne') : t('options.selectMultiple')}
+              </p>
+              <div className="space-y-2">
+                {group.options.map((option) => {
+                  const checked = (selectedByGroup[group.id] ?? []).includes(option.id);
+                  return (
+                    <label
+                      key={option.id}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors"
+                      style={{
+                        borderColor: checked ? C.accent : C.border,
+                        background: checked ? C.accentDim : C.bg2,
+                      }}
+                    >
+                      <input
+                        type={group.selectionType === 'single' ? 'radio' : 'checkbox'}
+                        name={`option-group-${group.id}`}
+                        checked={checked}
+                        onChange={() => toggleOption(group, option.id)}
+                        className="w-4 h-4 accent-[#DCB515]"
+                      />
+                      <span className="text-sm" style={{ color: C.text }}>{option.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-3 rounded-2xl text-sm font-medium transition-all"
+            style={btnGhost}
+          >
+            {t('options.cancel')}
+          </button>
+          <button
+            type="button"
+            disabled={!isValid}
+            onClick={handleConfirm}
+            className="flex-1 py-3 rounded-2xl text-sm font-semibold transition-all disabled:opacity-50"
+            style={btnAccent}
+          >
+            {t('options.confirm')}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [internalScreen, setInternalScreen] = useState<Screen>('assign');
@@ -433,6 +640,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [role, setRole]               = useState<Role>('staff');
   const [notePopupId, setNotePopupId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft]     = useState('');
+  const [optionsModalItem, setOptionsModalItem] = useState<MenuItem | null>(null);
   const noteTextareaRef               = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -467,6 +675,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const categoryList = live ? (live.categories ?? ['All']) : CATEGORIES;
   const bookingData = live?.booking ?? MOCK_BOOKING;
   const guestDisplayName = live?.guestName ?? MOCK_BOOKING.memberName;
+  const translate = (key: string) => live?.t?.(key) ?? key;
 
   const menuItemSignature = live?.menuItems?.map((item) => item.id).join('|') ?? '';
 
@@ -505,16 +714,31 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     setShowBookingDialog(false);
   };
 
-  const addItem = (item: MenuItem) => {
+  const addItem = (item: MenuItem, selectedOptions?: SelectedMenuOption[]) => {
     if (live) {
-      live.onAddItem(item);
+      live.onAddItem(item, selectedOptions);
       return;
     }
+    const lineId = buildCartLineId(item, selectedOptions);
+    const cartItem: CartItem = {
+      ...item,
+      id: lineId,
+      selectedOptions,
+      qty: 1,
+    };
     setInternalCart(prev => {
-      const ex = prev.find(c => c.id === item.id);
-      return ex ? prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c)
-                : [...prev, { ...item, qty: 1 }];
+      const ex = prev.find(c => c.id === lineId);
+      return ex ? prev.map(c => c.id === lineId ? { ...c, qty: c.qty + 1 } : c)
+                : [...prev, cartItem];
     });
+  };
+
+  const handleMenuCardClick = (item: MenuItem) => {
+    if ((item.optionGroups?.length ?? 0) > 0) {
+      setOptionsModalItem(item);
+      return;
+    }
+    addItem(item);
   };
 
   const removeItem = (id: string) => {
@@ -530,11 +754,23 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     });
   };
 
-  const getQty = (id: string) => cart.find(c => c.id === id)?.qty ?? 0;
+  const getQty = (id: string) =>
+    cart
+      .filter((line) => line.id === id || line.id.startsWith(`${id}-`))
+      .reduce((sum, line) => sum + line.qty, 0);
+
+  const removeMenuItem = (baseId: string) => {
+    const matching = cart.filter((line) => line.id === baseId || line.id.startsWith(`${baseId}-`));
+    if (!matching.length) {
+      return;
+    }
+    removeItem(matching[matching.length - 1].id);
+  };
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
 
   const guestAllergens = new Set(
-    bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen.toLowerCase()))
+    (live?.guestAllergies ?? bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen)))
+      .map((allergen) => allergen.toLowerCase()),
   );
   const hasAllergenWarning = (item: MenuItem) =>
     item.allergens?.some(a => guestAllergens.has(a.toLowerCase())) ?? false;
@@ -665,6 +901,20 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
             </motion.div>
           );
         })()}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {optionsModalItem && (
+          <ItemOptionsModal
+            item={optionsModalItem}
+            t={translate}
+            onClose={() => setOptionsModalItem(null)}
+            onConfirm={(selectedOptions) => {
+              addItem(optionsModalItem, selectedOptions);
+              setOptionsModalItem(null);
+            }}
+          />
+        )}
       </AnimatePresence>
 
       {/* ── Select Booking dialog (staff assign flow) ───────────────────────── */}
@@ -927,7 +1177,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ WELCOME ═════════════════════════════════════════════════════════════ */}
       {screen === 'welcome' && (
         <div className="h-full flex flex-col">
-          <KioskHeader />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left — greeting */}
@@ -962,17 +1212,22 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 {assignedSuite?.name} · {assignedSuite?.kind}
               </div>
 
-              <h1 className="text-5xl mb-2 text-center" style={{ fontWeight: 300, color: C.text }}>
-                Welcome, {guestDisplayName.split(' ')[0]}
+              <h1 className="text-5xl mb-4 text-center" style={{ fontWeight: 300, color: C.text }}>
+                {translate('welcome.greeting')}
               </h1>
-              <p className="text-base mb-10" style={{ color: C.textMid }}>to HKIA VIP Lounge</p>
+
+              {live?.welcomeLanguageSwitcher && (
+                <div className="mb-8">
+                  {live.welcomeLanguageSwitcher}
+                </div>
+              )}
 
               <button onClick={() => goTo('menu')}
                 className="px-12 py-5 rounded-2xl font-semibold text-lg transition-all active:scale-[0.97] shadow-lg mb-4"
                 style={{ ...btnAccent, boxShadow: `0 8px 24px ${C.accent}44` }}>
                 <span className="flex items-center gap-2">
                   <Utensils className="w-5 h-5" />
-                  Order Now
+                  {translate('welcome.orderNow')}
                 </span>
               </button>
 
@@ -980,7 +1235,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm transition-all active:scale-[0.97]"
                 style={btnGhost}>
                 <History className="w-4 h-4" />
-                Order History {orders.length > 0 && `(${orders.length})`}
+                {translate('welcome.orderHistory')} {orders.length > 0 && `(${orders.length})`}
               </button>
             </div>
 
@@ -993,7 +1248,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ MENU ════════════════════════════════════════════════════════════════ */}
       {screen === 'menu' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} />
 
           <div className="flex-1 flex overflow-hidden">
             {/* Left — menu */}
@@ -1047,75 +1302,103 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 {filteredMenu.length === 0 ? (
                   <p className="py-10 text-center text-sm" style={{ color: C.textMid }}>
                     {live && menuSource.length === 0
-                      ? 'No active menu is available for ordering.'
-                      : 'No menu items in this section.'}
+                      ? translate('menu.noActiveMenu')
+                      : translate('menu.noItemsInSection')}
                   </p>
                 ) : (
                 <div key={category} className="grid grid-cols-3 gap-3">
                   {filteredMenu.map((item) => {
                     const qty = getQty(item.id);
-                    const warn = role === 'staff' && hasAllergenWarning(item);
+                    const warn = hasAllergenWarning(item);
                     const rowKey = `${item.sectionId ?? 'all'}-${item.id}`;
+                    const allergenText = item.allergens?.length
+                      ? `⚠️ ${translate('menu.contains')}: ${item.allergens.join(', ')}`
+                      : null;
                     return (
                       <div
                         key={rowKey}
-                        className="rounded-2xl flex flex-row transition-all overflow-hidden relative"
-                        style={{
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleMenuCardClick(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleMenuCardClick(item);
+                          }
+                        }}
+                        className={`rounded-2xl flex flex-row transition-shadow overflow-hidden relative cursor-pointer hover:shadow-md ${
+                          warn ? 'border-2 border-red-500 bg-red-50' : ''
+                        }`}
+                        style={warn ? undefined : {
                           background: C.bg,
-                          border: `1.5px solid ${warn ? '#fca5a5' : qty > 0 ? C.accent : C.border}`,
+                          border: `1.5px solid ${qty > 0 ? C.accent : C.border}`,
                           boxShadow: qty > 0 ? `0 0 0 3px ${C.accent}22` : undefined,
                         }}
                       >
-
-                        {/* Square photo */}
                         <div className="shrink-0 overflow-hidden relative pointer-events-none">
                           <ProductThumbnail imageUrl={item.image} alt={item.name} variant="menu" />
                           {warn && (
-                            <div className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center shadow"
-                              style={{ background: '#fee2e2' }}>
+                            <div className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center shadow bg-red-100">
                               <AlertTriangle className="w-3 h-3 text-red-500" />
                             </div>
                           )}
                         </div>
 
-                        {/* Content */}
                         <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-between pointer-events-none">
                           <div>
-                            <p className="font-semibold text-sm leading-tight" style={{ color: C.text }}>{item.name}</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="font-semibold text-sm leading-tight" style={{ color: C.text }}>{item.name}</p>
+                              {(item.dietaryTags ?? []).map((tag) => (
+                                <span
+                                  key={`${item.id}-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 rounded-full uppercase tracking-wider"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
                             <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>{item.category}</p>
-                            <p className="text-xs leading-tight mt-0.5 line-clamp-1" style={{ color: C.textMid }}>{item.description}</p>
-                            {warn && (
-                              <p className="text-[10px] text-red-500 leading-tight mt-0.5 line-clamp-1">
-                                {item.allergens?.filter(a => guestAllergens.has(a.toLowerCase())).join(', ')}
+                            {allergenText && (
+                              <p className={`text-[10px] leading-tight mt-0.5 line-clamp-2 ${warn ? 'text-red-600' : ''}`}
+                                style={warn ? undefined : { color: C.textMid }}>
+                                {allergenText}
                               </p>
                             )}
                           </div>
                         </div>
 
-                        {/* Qty controls */}
-                        <div className="relative z-10 flex items-center pr-3 shrink-0 self-center">
+                        <div
+                          className="relative z-10 flex items-center pr-3 shrink-0 self-center"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           {qty === 0 ? (
                             <button
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                addItem(item);
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                handleMenuCardClick(item);
                               }}
-                              className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-95 min-h-[44px] min-w-[44px]"
-                              style={btnAccent}
-                              aria-label={`Add ${item.name}`}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center active:scale-95 min-h-[44px] min-w-[44px] ${
+                                warn ? 'bg-red-600 text-white' : ''
+                              }`}
+                              style={warn ? undefined : btnAccent}
+                              aria-label={warn ? `${translate('menu.addWithCaution')} ${item.name}` : `Add ${item.name}`}
                             >
-                              <Plus className="w-4 h-4" />
+                              {warn ? (
+                                <span className="text-[9px] font-bold leading-none px-1">!</span>
+                              ) : (
+                                <Plus className="w-4 h-4" />
+                              )}
                             </button>
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  e.preventDefault();
-                                  removeItem(item.id);
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  removeMenuItem(item.id);
                                 }}
                                 className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
                                 style={btnGhost}
@@ -1126,13 +1409,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                               <span className="text-sm font-bold w-5 text-center" style={{ color: C.text }}>{qty}</span>
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  e.preventDefault();
-                                  addItem(item);
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  handleMenuCardClick(item);
                                 }}
                                 className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
-                                style={btnAccent}
+                                style={warn ? { background: '#dc2626', color: '#fff' } : btnAccent}
                                 aria-label={`Add another ${item.name}`}
                               >
                                 <Plus className="w-3.5 h-3.5" />
@@ -1169,7 +1452,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CART ════════════════════════════════════════════════════════════════ */}
       {screen === 'cart' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border }}>
             <button onClick={() => goTo('menu')}
@@ -1271,7 +1554,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CONFIRM ═════════════════════════════════════════════════════════════ */}
       {screen === 'confirm' && (
         <div className="h-full flex flex-col">
-          <KioskHeader />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center" style={{ background: C.bg2 }}>
             <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -1327,7 +1610,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ HISTORY ═════════════════════════════════════════════════════════════ */}
       {screen === 'history' && (
         <div className="h-full flex flex-col">
-          <KioskHeader />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
             <button onClick={() => goTo('menu')} className="p-2 rounded-xl transition-colors" style={btnGhost}>
