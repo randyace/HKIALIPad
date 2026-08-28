@@ -190,6 +190,7 @@ export interface GuestKioskLiveConfig {
   onAssign: () => void | Promise<void>;
   isAssigning?: boolean;
   isLoadingSuites?: boolean;
+  suitesLoadError?: string | null;
   assignError?: string | null;
   submitError?: string | null;
   assignedSuite: { name: string; kind: string } | null;
@@ -696,6 +697,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 </label>
                 {live?.isLoadingSuites ? (
                   <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>Loading suites…</p>
+                ) : live?.suitesLoadError ? (
+                  <p className="text-sm mb-6 text-center text-red-600">{live.suitesLoadError}</p>
                 ) : suiteList.length === 0 ? (
                   <p className="text-sm mb-6 text-center" style={{ color: C.textMid }}>No active suites found.</p>
                 ) : (
