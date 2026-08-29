@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare, Bell } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
 import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
+import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
+import { StringDatePicker } from '@/components/ui/CustomDatePicker';
 import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 
 // ── Brand tokens ───────────────────────────────────────────────────────────────
@@ -16,6 +18,11 @@ const C = {
   textLight: '#403F3455',
   border:    '#D6D4C8',
 };
+
+const BOOKING_FILTER_FIELD_CLASS =
+  'rounded-xl border border-[#D6D4C8] bg-[#E7E6DD] px-4 py-3 text-sm text-[#403F34] outline-none min-h-[48px]';
+
+const BOOKING_FILTER_INPUT_CLASS = `w-full ${BOOKING_FILTER_FIELD_CLASS}`;
 
 // ── Suite list ─────────────────────────────────────────────────────────────────
 const SUITES = [
@@ -220,7 +227,44 @@ export interface GuestKioskLiveConfig {
   suites: { id: string; name: string; kind: string; status?: string; isOccupied?: boolean }[];
   selectedSuiteId: string;
   onSelectSuite: (id: string) => void;
+  onAssignBooking?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
+  onStartMultiSuiteAssignment?: (suiteId: string, booking: NonNullable<GuestKioskLiveConfig['unassignedBookings']>[number]) => void;
+  assignmentMode?: boolean;
+  pendingBooking?: {
+    id: number;
+    booking_number: string;
+    guest_name: string;
+    suites_count?: number;
+    lounge_seats_count?: number;
+    required_suites_count?: number;
+  } | null;
+  selectedSuiteIds?: number[];
+  onAssignmentSuiteToggle?: (suiteId: string) => void;
+  onConfirmAssignment?: () => void | Promise<void>;
+  onCancelAssignment?: () => void;
   onPairSuite?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
+  onOccupiedSuiteOpen?: (suiteId: string) => void;
+  onOccupiedDialogClose?: () => void;
+  onLoadOccupiedSuite?: () => void | Promise<void>;
+  occupiedSession?: {
+    suite_id: number;
+    suite_name: string;
+    guest_name: string;
+    booking_number: string | null;
+    member_id?: string | null;
+    pax: number;
+    ordered_items: Array<{
+      pos_menu_item_id: number;
+      name: string;
+      quantity: number;
+      remarks: string | null;
+      kitchen_status: string;
+    }>;
+  } | null;
+  isLoadingOccupiedSession?: boolean;
+  occupiedSessionError?: string | null;
+  isLoadingSuite?: boolean;
+  loadSuiteError?: string | null;
   isAssigning?: boolean;
   isLoadingSuites?: boolean;
   suitesLoadError?: string | null;
@@ -230,11 +274,17 @@ export interface GuestKioskLiveConfig {
     id: number;
     booking_number: string;
     guest_name: string;
+    member_id?: string | null;
     pax: number;
     flight_number?: string | null;
     flight_time?: string | null;
+    visit_at?: string | null;
+    required_suites_count?: number;
+    suites_count?: number;
+    lounge_seats_count?: number;
   }>;
   isLoadingUnassignedBookings?: boolean;
+  onUnassignedBookingsDateChange?: (date: string) => void;
   isStaffAuthenticated?: boolean;
   onStaffLogin?: (email: string, password: string) => void | Promise<void>;
   isStaffLoggingIn?: boolean;
@@ -308,6 +358,43 @@ function suiteStatusBadgeClass(status?: string, isOccupied?: boolean): string {
     return 'bg-blue-100 text-blue-800';
   }
   return 'bg-green-100 text-green-800';
+}
+
+function formatDateYmd(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatBookingDateLabel(dateYmd: string): string {
+  const today = formatDateYmd(new Date());
+  const parsed = new Date(`${dateYmd}T12:00:00`);
+  const formatted = parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  if (dateYmd === today) {
+    return `today (${formatted})`;
+  }
+
+  return formatted;
+}
+
+function canOpenBookingDialog(status?: string, isOccupied?: boolean): boolean {
+  const normalized = String(status ?? '').toLowerCase();
+  if (isOccupied) {
+    return false;
+  }
+
+  return normalized === 'available' || normalized === 'cleaning';
+}
+
+function isOccupiedSuite(status?: string, isOccupied?: boolean): boolean {
+  const normalized = String(status ?? '').toLowerCase();
+  return Boolean(isOccupied) || normalized === 'occupied' || normalized === 'food-served';
 }
 
 function ProductThumbnail({
@@ -477,7 +564,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [internalOrders, setInternalOrders] = useState<PlacedOrder[]>([]);
   const [category, setCategory]       = useState('All');
   const [showBookingDialog, setShowBookingDialog] = useState(false);
+  const [showOccupiedDialog, setShowOccupiedDialog] = useState(false);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const [bookingSearchQuery, setBookingSearchQuery] = useState('');
+  const [selectedDate, setSelectedDate] = useState(() => formatDateYmd(new Date()));
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [clock, setClock]             = useState(new Date());
@@ -505,6 +595,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     }
   }, [live?.checkoutToast]);
 
+  useEffect(() => {
+    live?.onUnassignedBookingsDateChange?.(selectedDate);
+  }, [live?.onUnassignedBookingsDateChange, selectedDate]);
+
   const screen = live?.screen ?? internalScreen;
   const goTo = (next: Screen) => {
     if (live) live.navigate(next);
@@ -527,6 +621,50 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const bookingData = live?.booking ?? MOCK_BOOKING;
   const guestDisplayName = live?.guestName ?? MOCK_BOOKING.memberName;
   const translate = (key: string) => live?.t?.(key) ?? key;
+
+  const filteredUnassignedBookings = useMemo(() => {
+    const bookings = live?.unassignedBookings ?? [];
+    const query = bookingSearchQuery.trim().toLowerCase();
+    if (!query) {
+      return bookings;
+    }
+
+    return bookings.filter((booking) => {
+      const haystack = [
+        booking.guest_name,
+        booking.member_id,
+        booking.booking_number,
+        booking.flight_number,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [live?.unassignedBookings, bookingSearchQuery]);
+
+  const closeBookingDialog = () => {
+    setShowBookingDialog(false);
+    setBookingSearchQuery('');
+    setPendingBookingId(null);
+  };
+
+  const closeOccupiedDialog = () => {
+    setShowOccupiedDialog(false);
+    live?.onOccupiedDialogClose?.();
+  };
+
+  const assignmentMode = live?.assignmentMode ?? false;
+  const pendingAssignmentBooking = live?.pendingBooking ?? null;
+  const assignmentSelectedSuiteIds = live?.selectedSuiteIds ?? [];
+  const requiredAssignmentCount = pendingAssignmentBooking
+    ? resolveRequiredSuiteCount(pendingAssignmentBooking)
+    : 0;
+  const suitesRemainingCount = pendingAssignmentBooking
+    ? Math.max(0, requiredAssignmentCount - assignmentSelectedSuiteIds.length)
+    : 0;
+  const canConfirmAssignment = assignmentMode && suitesRemainingCount === 0;
 
   const menuItemSignature = live?.menuItems?.map((item) => item.id).join('|') ?? '';
 
@@ -552,16 +690,59 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const handleSuiteClick = (suiteId: string) => {
     setSelectedSuiteId(suiteId);
     setPendingBookingId(null);
-    if (live?.onPairSuite) {
-      setShowBookingDialog(true);
+    const suite = suiteList.find((row) => row.id === suiteId);
+
+    if (assignmentMode) {
+      if (!canOpenBookingDialog(suite?.status, suite?.isOccupied)) {
+        return;
+      }
+      live?.onAssignmentSuiteToggle?.(suiteId);
       return;
+    }
+
+    if (live && (live.onAssignBooking || live.onPairSuite) && isOccupiedSuite(suite?.status, suite?.isOccupied)) {
+      live.onOccupiedSuiteOpen?.(suiteId);
+      setShowOccupiedDialog(true);
+      return;
+    }
+
+    if (live?.onAssignBooking || live?.onPairSuite) {
+      if (!canOpenBookingDialog(suite?.status, suite?.isOccupied)) {
+        return;
+      }
+      setShowBookingDialog(true);
     }
   };
 
   const confirmPair = async () => {
-    if (!live?.onPairSuite || !selectedSuiteId) return;
-    await live.onPairSuite(selectedSuiteId, pendingBookingId);
-    setShowBookingDialog(false);
+    if (!selectedSuiteId) return;
+
+    if (pendingBookingId !== null) {
+      const booking = (live?.unassignedBookings ?? []).find((row) => row.id === pendingBookingId);
+      if (!booking) {
+        return;
+      }
+
+      const requiredCount = (booking.suites_count ?? 0) + (booking.lounge_seats_count ?? 0);
+      const normalizedRequiredCount = requiredCount > 0 ? requiredCount : resolveRequiredSuiteCount(booking);
+
+      if (normalizedRequiredCount > 1) {
+        live?.onStartMultiSuiteAssignment?.(selectedSuiteId, booking);
+        closeBookingDialog();
+        return;
+      }
+    }
+
+    if (live?.onAssignBooking) {
+      await live.onAssignBooking(selectedSuiteId, pendingBookingId);
+      closeBookingDialog();
+      return;
+    }
+
+    if (live?.onPairSuite) {
+      await live.onPairSuite(selectedSuiteId, pendingBookingId);
+      closeBookingDialog();
+    }
   };
 
   const addItem = (item: MenuItem, selectedOptions?: SelectedMenuOption[]) => {
@@ -776,19 +957,20 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowBookingDialog(false)}
+            onClick={closeBookingDialog}
           >
             <motion.div
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.9 }}
-              className="rounded-3xl p-6 w-full max-w-md shadow-2xl mx-4"
+              className="rounded-3xl p-6 w-full max-w-3xl shadow-2xl mx-4"
               style={{ background: C.bg, border: `1px solid ${C.border}` }}
               onClick={(e) => e.stopPropagation()}
             >
               <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>Select Booking</p>
               <p className="text-sm mb-4" style={{ color: C.textMid }}>
-                Link a reservation to this suite, or start as a walk-in.
+                Link a reservation to this suite, or start as a walk-in. Showing visits for{' '}
+                {formatBookingDateLabel(selectedDate)}.
               </p>
 
               <button
@@ -807,11 +989,39 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <span className="block text-xs mt-0.5" style={{ color: C.textMid }}>No linked reservation</span>
               </button>
 
+              <div className="sticky top-0 z-10 mb-3 flex gap-3 items-center w-full">
+                <div
+                  className={`flex flex-1 min-w-0 items-center gap-2 ${BOOKING_FILTER_FIELD_CLASS}`}
+                >
+                  <Search className="w-4 h-4 shrink-0" style={{ color: C.textMid }} />
+                  <input
+                    type="search"
+                    value={bookingSearchQuery}
+                    onChange={(event) => setBookingSearchQuery(event.target.value)}
+                    placeholder="Search guest, member ID, booking no., flight…"
+                    className="w-full bg-transparent text-sm outline-none min-h-[48px]"
+                    style={{ color: C.text }}
+                    aria-label="Search bookings"
+                  />
+                </div>
+                <div className="w-48 shrink-0">
+                  <StringDatePicker
+                    value={selectedDate}
+                    onChange={setSelectedDate}
+                    isClearable={false}
+                    data-testid="booking-visit-date"
+                    aria-label="Visit date"
+                    className={BOOKING_FILTER_INPUT_CLASS}
+                    dateFormat="dd/MM/yyyy"
+                  />
+                </div>
+              </div>
+
               {live?.isLoadingUnassignedBookings ? (
                 <p className="text-sm text-center py-4" style={{ color: C.textMid }}>Loading bookings…</p>
               ) : (
-                <div className="max-h-52 overflow-y-auto space-y-2 mb-4">
-                  {(live?.unassignedBookings ?? []).map((booking) => (
+                <div className="max-h-72 overflow-y-auto space-y-2 mb-4">
+                  {filteredUnassignedBookings.map((booking) => (
                     <button
                       key={booking.id}
                       type="button"
@@ -825,20 +1035,23 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         color: C.text,
                       }}
                     >
-                      <div className="flex justify-between gap-2">
+                      <div className="flex justify-between gap-3">
                         <span className="font-medium">{booking.guest_name}</span>
-                        <span className="text-xs" style={{ color: C.textMid }}>{booking.booking_number}</span>
+                        <span className="text-xs shrink-0" style={{ color: C.textMid }}>{booking.booking_number}</span>
                       </div>
                       <span className="text-xs block mt-0.5" style={{ color: C.textMid }}>
+                        {booking.member_id ? `Member ${booking.member_id} · ` : ''}
                         {booking.flight_number ?? '—'}
                         {booking.flight_time ? ` · ${booking.flight_time}` : ''}
                         {` · ${booking.pax} pax`}
                       </span>
                     </button>
                   ))}
-                  {(live?.unassignedBookings ?? []).length === 0 && (
+                  {filteredUnassignedBookings.length === 0 && (
                     <p className="text-xs text-center py-2" style={{ color: C.textMid }}>
-                      No unassigned bookings for today.
+                      {bookingSearchQuery.trim()
+                        ? 'No bookings match your search.'
+                        : `No unassigned bookings for ${formatBookingDateLabel(selectedDate)}.`}
                     </p>
                   )}
                 </div>
@@ -851,7 +1064,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowBookingDialog(false)}
+                  onClick={closeBookingDialog}
                   className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px]"
                   style={btnGhost}
                 >
@@ -865,6 +1078,131 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   style={btnAccent}
                 >
                   {live?.isAssigning ? 'Assigning…' : 'Assign & Start Guest Mode'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Occupied suite details (staff load existing session) ─────────────── */}
+      <AnimatePresence>
+        {showOccupiedDialog && (
+          <motion.div
+            key="occupied-suite-dialog"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={closeOccupiedDialog}
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="rounded-3xl p-6 w-full max-w-3xl shadow-2xl mx-4 max-h-[85vh] overflow-y-auto"
+              style={{ background: C.bg, border: `1px solid ${C.border}` }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>
+                Occupied Suite
+              </p>
+              <p className="text-sm mb-4" style={{ color: C.textMid }}>
+                {suiteList.find((suite) => suite.id === selectedSuiteId)?.name ?? live?.occupiedSession?.suite_name ?? 'Suite'}{' '}
+                is already in use. Review the current session and load this iPad to the guest menu.
+              </p>
+
+              {live?.isLoadingOccupiedSession ? (
+                <div className="flex items-center justify-center gap-2 py-10" style={{ color: C.textMid }}>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Loading suite details…</span>
+                </div>
+              ) : live?.occupiedSessionError ? (
+                <p className="text-sm text-center py-8 text-red-600">{live.occupiedSessionError}</p>
+              ) : live?.occupiedSession ? (
+                <div className="space-y-4">
+                  <div
+                    className="rounded-2xl border p-4 grid grid-cols-1 sm:grid-cols-2 gap-4"
+                    style={{ background: C.bg2, borderColor: C.border }}
+                  >
+                    <div>
+                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Guest</p>
+                      <p className="text-base font-semibold" style={{ color: C.text }}>
+                        {live.occupiedSession.guest_name}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Booking</p>
+                      <p className="text-base font-semibold" style={{ color: C.text }}>
+                        {live.occupiedSession.booking_number ?? 'Walk-in'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4" style={{ color: C.textMid }} />
+                      <span className="text-sm" style={{ color: C.text }}>{live.occupiedSession.pax} pax</span>
+                    </div>
+                    {live.occupiedSession.member_id ? (
+                      <div>
+                        <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Member ID</p>
+                        <p className="text-sm font-medium" style={{ color: C.text }}>{live.occupiedSession.member_id}</p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-2xl border p-4" style={{ borderColor: C.border }}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <UtensilsCrossed className="w-4 h-4" style={{ color: C.accent }} />
+                      <p className="text-sm font-semibold" style={{ color: C.text }}>Ordered Items</p>
+                    </div>
+                    {live.occupiedSession.ordered_items.length === 0 ? (
+                      <p className="text-sm" style={{ color: C.textMid }}>No live orders on this suite yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {live.occupiedSession.ordered_items.map((item, index) => (
+                          <div
+                            key={`${item.pos_menu_item_id}-${index}`}
+                            className="flex items-start justify-between gap-3 rounded-xl border px-3 py-2"
+                            style={{ borderColor: C.border, background: C.bg }}
+                          >
+                            <div>
+                              <p className="text-sm font-medium" style={{ color: C.text }}>{item.name}</p>
+                              {item.remarks ? (
+                                <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{item.remarks}</p>
+                              ) : null}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-sm font-semibold" style={{ color: C.text }}>x{item.quantity}</p>
+                              <p className="text-[11px] capitalize" style={{ color: C.textMid }}>{item.kitchen_status}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {live?.loadSuiteError ? (
+                <p className="text-sm mt-4 text-center text-red-600">{live.loadSuiteError}</p>
+              ) : null}
+
+              <div className="flex gap-2 mt-6">
+                <button
+                  type="button"
+                  onClick={closeOccupiedDialog}
+                  className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px] border"
+                  style={{ borderColor: C.border, color: C.textMid, background: C.bg }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void live?.onLoadOccupiedSuite?.()}
+                  disabled={live?.isLoadingOccupiedSession || Boolean(live?.occupiedSessionError) || live?.isLoadingSuite}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
+                  style={btnAccent}
+                >
+                  {live?.isLoadingSuite ? 'Loading…' : 'Load this Suite'}
                 </button>
               </div>
             </motion.div>
@@ -929,7 +1267,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
       {/* ══ ASSIGN ══════════════════════════════════════════════════════════════ */}
       {screen === 'assign' && (
-        <div className="h-full flex flex-col">
+        <div className={`h-full flex flex-col ${assignmentMode ? 'pb-28' : ''}`}>
           {/* Header with logo */}
           <div className="flex flex-col items-center py-6 border-b" style={{ borderColor: C.border }}>
             <img src={logoImg} alt="HKIA VIP Lounge" className="h-12 mb-3" />
@@ -1008,7 +1346,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 </div>
                 <div className="flex-1">
                   <p className="font-semibold" style={{ color: C.text }}>Assign Suite to this iPad</p>
-                  <p className="text-xs" style={{ color: C.textMid }}>Tap a suite to link a booking or walk-in</p>
+                  <p className="text-xs" style={{ color: C.textMid }}>
+                    {assignmentMode
+                      ? 'Tap available suites to add them to this assignment'
+                      : 'Tap a suite to link a booking or walk-in'}
+                  </p>
                 </div>
                 {live?.onStaffLogout && (
                   <button
@@ -1037,12 +1379,16 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   {suiteList.map(s => {
                     const statusLabel = suiteStatusLabel(s.status, s.isOccupied);
                     const badgeClass = suiteStatusBadgeClass(s.status, s.isOccupied);
+                    const suiteNumericId = Number(s.id);
+                    const isAvailableForAssignment = canOpenBookingDialog(s.status, s.isOccupied);
+                    const isAssignmentDisabled = assignmentMode && !isAvailableForAssignment;
+                    const isAssignmentSelected = assignmentMode && assignmentSelectedSuiteIds.includes(suiteNumericId);
                     return (
                     <button
                       key={s.id}
                       type="button"
                       onClick={() => {
-                        if (live?.onPairSuite) {
+                        if (live?.onAssignBooking || live?.onPairSuite) {
                           handleSuiteClick(s.id);
                           return;
                         }
@@ -1053,10 +1399,15 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                           goTo('welcome');
                         }
                       }}
-                      className="flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px]"
-                      style={selectedSuiteId === s.id
+                      disabled={isAssignmentDisabled}
+                      className={`flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px] ${
+                        isAssignmentDisabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''
+                      } ${
+                        isAssignmentSelected ? 'ring-4 ring-blue-500 border-blue-500' : ''
+                      }`}
+                      style={!assignmentMode && selectedSuiteId === s.id
                         ? { background: C.accentDim, borderColor: C.accent, color: C.text }
-                        : { background: C.bg, borderColor: C.border, color: C.textMid }}
+                        : { background: C.bg, borderColor: isAssignmentSelected ? '#3b82f6' : C.border, color: C.textMid }}
                     >
                       <div className="flex w-full items-start justify-between gap-2">
                         <span className="text-sm font-medium">{s.name}</span>
@@ -1076,6 +1427,40 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               )}
             </div>
           </div>
+
+          {assignmentMode && pendingAssignmentBooking ? (
+            <div className="fixed bottom-0 left-0 right-0 z-[60] border-t px-6 py-4 shadow-2xl" style={{ background: C.bg, borderColor: C.border }}>
+              <div className="mx-auto flex w-full max-w-lg flex-col gap-3">
+                <p className="text-sm font-semibold text-center" style={{ color: C.text }}>
+                  {suitesRemainingCount > 0
+                    ? `Please select ${suitesRemainingCount} more suite${suitesRemainingCount === 1 ? '' : 's'} for ${pendingAssignmentBooking.guest_name}`
+                    : `All suites selected for ${pendingAssignmentBooking.guest_name}`}
+                </p>
+                {live?.assignError ? (
+                  <p className="text-sm text-center text-red-600">{live.assignError}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => live?.onCancelAssignment?.()}
+                    className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px]"
+                    style={btnGhost}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void live?.onConfirmAssignment?.()}
+                    disabled={!canConfirmAssignment || live?.isAssigning}
+                    className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
+                    style={btnAccent}
+                  >
+                    {live?.isAssigning ? 'Assigning…' : 'Confirm Assignment'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
