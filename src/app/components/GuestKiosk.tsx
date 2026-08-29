@@ -6,6 +6,14 @@ import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
 import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
 import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
+import { PreOrderDispatchDialog } from '@/components/PreOrderDispatchDialog';
+import {
+  bookingRequiresLoungeAssignment,
+  evaluateLoungePreorderAssignment,
+  hasLoungeAmongSuiteIds,
+  resolvePreorderAssignSuiteIds,
+  shouldUseMultiSuitePreorderAssign,
+} from '@/lib/suiteAssignment';
 
 // ── Brand tokens ───────────────────────────────────────────────────────────────
 const C = {
@@ -227,7 +235,12 @@ export interface GuestKioskLiveConfig {
   suites: { id: string; name: string; kind: string; status?: string; isOccupied?: boolean }[];
   selectedSuiteId: string;
   onSelectSuite: (id: string) => void;
-  onAssignBooking?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
+  onAssignBooking?: (
+    suiteId: string,
+    bookingId: number | null,
+    dispatchItemIds?: number[],
+    allSuiteIds?: number[],
+  ) => Promise<{ ok: true } | { ok: false; error: string }> | void;
   onStartMultiSuiteAssignment?: (suiteId: string, booking: NonNullable<GuestKioskLiveConfig['unassignedBookings']>[number]) => void;
   assignmentMode?: boolean;
   pendingBooking?: {
@@ -237,10 +250,21 @@ export interface GuestKioskLiveConfig {
     suites_count?: number;
     lounge_seats_count?: number;
     required_suites_count?: number;
+    has_virtual_lounge_preorder?: boolean;
+    has_preorder?: boolean;
+    pre_orders?: Array<{
+      id: number;
+      pos_menu_item_id: number;
+      name_en: string | null;
+      quantity: number;
+      remarks: string | null;
+    }>;
   } | null;
   selectedSuiteIds?: number[];
   onAssignmentSuiteToggle?: (suiteId: string) => void;
-  onConfirmAssignment?: () => void | Promise<void>;
+  onConfirmAssignment?: (
+    dispatchItemIds?: number[],
+  ) => Promise<{ ok: true } | { ok: false; error: string }> | void;
   onCancelAssignment?: () => void;
   onPairSuite?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
   onOccupiedSuiteOpen?: (suiteId: string) => void;
@@ -282,6 +306,15 @@ export interface GuestKioskLiveConfig {
     required_suites_count?: number;
     suites_count?: number;
     lounge_seats_count?: number;
+    has_virtual_lounge_preorder?: boolean;
+    has_preorder?: boolean;
+    pre_orders?: Array<{
+      id: number;
+      pos_menu_item_id: number;
+      name_en: string | null;
+      quantity: number;
+      remarks: string | null;
+    }>;
   }>;
   isLoadingUnassignedBookings?: boolean;
   onUnassignedBookingsDateChange?: (date: string) => void;
@@ -553,6 +586,19 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
   );
 }
 
+function bookingHasPreorders(
+  booking?: {
+    has_preorder?: boolean;
+    pre_orders?: Array<{ id: number }>;
+  } | null,
+): boolean {
+  if (!booking) {
+    return false;
+  }
+
+  return Boolean(booking.has_preorder) || (booking.pre_orders?.length ?? 0) > 0;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [internalScreen, setInternalScreen] = useState<Screen>('assign');
@@ -576,6 +622,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [noteDraft, setNoteDraft]     = useState('');
   const [optionsModalItem, setOptionsModalItem] = useState<MenuItem | null>(null);
   const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
+  const [showPreorderDispatch, setShowPreorderDispatch] = useState(false);
+  const [preorderDispatchBooking, setPreorderDispatchBooking] = useState<GuestKioskLiveConfig['pendingBooking']>(null);
+  const [preorderDispatchMode, setPreorderDispatchMode] = useState<'single' | 'multi'>('single');
+  const [preorderDispatchSuiteId, setPreorderDispatchSuiteId] = useState('');
+  const [preorderDispatchError, setPreorderDispatchError] = useState<string | null>(null);
   const noteTextareaRef               = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -655,6 +706,24 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     live?.onOccupiedDialogClose?.();
   };
 
+  const openPreorderDispatchDialog = (
+    booking: NonNullable<GuestKioskLiveConfig['pendingBooking']>,
+    mode: 'single' | 'multi',
+  ) => {
+    setPreorderDispatchBooking(booking);
+    setPreorderDispatchMode(mode);
+    setPreorderDispatchSuiteId(selectedSuiteId);
+    setPreorderDispatchError(null);
+    setShowPreorderDispatch(true);
+  };
+
+  const closePreorderDispatchDialog = () => {
+    setShowPreorderDispatch(false);
+    setPreorderDispatchBooking(null);
+    setPreorderDispatchSuiteId('');
+    setPreorderDispatchError(null);
+  };
+
   const assignmentMode = live?.assignmentMode ?? false;
   const pendingAssignmentBooking = live?.pendingBooking ?? null;
   const assignmentSelectedSuiteIds = live?.selectedSuiteIds ?? [];
@@ -665,6 +734,27 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     ? Math.max(0, requiredAssignmentCount - assignmentSelectedSuiteIds.length)
     : 0;
   const canConfirmAssignment = assignmentMode && suitesRemainingCount === 0;
+
+  const preorderAssignSuiteIds = useMemo(
+    () => resolvePreorderAssignSuiteIds({
+      assignmentMode,
+      assignmentSelectedSuiteIds,
+      preorderDispatchSuiteId,
+      selectedSuiteId,
+    }),
+    [
+      assignmentMode,
+      assignmentSelectedSuiteIds,
+      preorderDispatchSuiteId,
+      selectedSuiteId,
+    ],
+  );
+
+  const requiresLoungeForPreorders = bookingRequiresLoungeAssignment(preorderDispatchBooking);
+  const hasLoungeSuiteSelected = useMemo(
+    () => hasLoungeAmongSuiteIds(preorderAssignSuiteIds, suiteList),
+    [preorderAssignSuiteIds, suiteList],
+  );
 
   const menuItemSignature = live?.menuItems?.map((item) => item.id).join('|') ?? '';
 
@@ -731,6 +821,12 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
         closeBookingDialog();
         return;
       }
+
+      if (bookingHasPreorders(booking)) {
+        openPreorderDispatchDialog(booking, 'single');
+        closeBookingDialog();
+        return;
+      }
     }
 
     if (live?.onAssignBooking) {
@@ -742,6 +838,91 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     if (live?.onPairSuite) {
       await live.onPairSuite(selectedSuiteId, pendingBookingId);
       closeBookingDialog();
+    }
+  };
+
+  const handleConfirmAssignmentClick = async () => {
+    if (pendingAssignmentBooking && bookingHasPreorders(pendingAssignmentBooking)) {
+      openPreorderDispatchDialog(pendingAssignmentBooking, 'multi');
+      return;
+    }
+
+    const result = await live?.onConfirmAssignment?.();
+    if (result && !result.ok) {
+      setPreorderDispatchError(result.error);
+    }
+  };
+
+  const handlePreorderDispatchConfirm = async (selectedItemIds: number[]) => {
+    if (!preorderDispatchBooking) {
+      return;
+    }
+
+    setPreorderDispatchError(null);
+
+    const loungeValidation = evaluateLoungePreorderAssignment(
+      preorderDispatchBooking,
+      preorderAssignSuiteIds,
+      suiteList,
+    );
+
+    if (loungeValidation.blocked) {
+      setPreorderDispatchError(loungeValidation.error);
+      return;
+    }
+
+    try {
+      let result: { ok: true } | { ok: false; error: string } | undefined;
+
+      const useMultiAssign = shouldUseMultiSuitePreorderAssign({
+        preorderDispatchMode,
+        assignmentMode,
+        assignmentSelectedSuiteIds,
+        assignSuiteIds: preorderAssignSuiteIds,
+      });
+
+      if (useMultiAssign) {
+        result = await live?.onConfirmAssignment?.(selectedItemIds);
+      } else if (live?.onAssignBooking) {
+        const primarySuiteId = String(preorderAssignSuiteIds[0] ?? preorderDispatchSuiteId ?? selectedSuiteId);
+        if (!primarySuiteId) {
+          setPreorderDispatchError('No suite selected. Close this dialog and select a suite again.');
+          return;
+        }
+
+        result = await live.onAssignBooking(
+          primarySuiteId,
+          preorderDispatchBooking.id,
+          selectedItemIds,
+          preorderAssignSuiteIds,
+        );
+      } else if (live?.onPairSuite) {
+        const suiteId = String(preorderAssignSuiteIds[0] ?? preorderDispatchSuiteId ?? selectedSuiteId);
+        if (!suiteId) {
+          setPreorderDispatchError('No suite selected. Close this dialog and select a suite again.');
+          return;
+        }
+
+        await live.onPairSuite(suiteId, preorderDispatchBooking.id);
+        result = { ok: true };
+      }
+
+      if (!result) {
+        setPreorderDispatchError('Assignment is not available on this screen.');
+        return;
+      }
+
+      if (!result.ok) {
+        setPreorderDispatchError(result.error);
+        return;
+      }
+
+      closePreorderDispatchDialog();
+      closeBookingDialog();
+    } catch {
+      setPreorderDispatchError(
+        live?.assignError ?? 'Could not assign suite and send pre-orders.',
+      );
     }
   };
 
@@ -1265,6 +1446,26 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
         </div>
       )}
 
+      <PreOrderDispatchDialog
+        open={showPreorderDispatch}
+        bookingId={preorderDispatchBooking?.id}
+        guestName={preorderDispatchBooking?.guest_name}
+        items={(preorderDispatchBooking?.pre_orders ?? []).map((item) => ({
+          id: item.id,
+          pos_menu_item_id: item.pos_menu_item_id,
+          name_en: item.name_en,
+          quantity: item.quantity,
+          remarks: item.remarks,
+        }))}
+        isSubmitting={live?.isAssigning}
+        errorMessage={preorderDispatchError}
+        requiresLoungeAssignment={requiresLoungeForPreorders}
+        hasLoungeSuiteSelected={hasLoungeSuiteSelected}
+        onCancel={closePreorderDispatchDialog}
+        onConfirm={handlePreorderDispatchConfirm}
+        t={live?.t}
+      />
+
       {/* ══ ASSIGN ══════════════════════════════════════════════════════════════ */}
       {screen === 'assign' && (
         <div className={`h-full flex flex-col ${assignmentMode ? 'pb-28' : ''}`}>
@@ -1450,7 +1651,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void live?.onConfirmAssignment?.()}
+                    onClick={() => void handleConfirmAssignmentClick()}
                     disabled={!canConfirmAssignment || live?.isAssigning}
                     className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                     style={btnAccent}
