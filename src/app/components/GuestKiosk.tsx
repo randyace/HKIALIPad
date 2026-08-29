@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
+import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
+import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 
 // ── Brand tokens ───────────────────────────────────────────────────────────────
 const C = {
@@ -177,7 +179,11 @@ export interface MenuOptionGroup {
 export interface MenuItem {
   id: string;
   name: string;
+  /** POS master catalog category (yellow subtitle). */
   category: string;
+  posCategoryName?: string;
+  /** Active menu section tab — tab filtering only. */
+  sectionTab?: string;
   description: string;
   image: string;
   allergens?: string[];
@@ -258,6 +264,9 @@ export interface GuestKioskLiveConfig {
   booking?: KioskBooking | null;
   onStaffReset: () => void;
   hideDemoToggle?: boolean;
+  onRequestCheckout?: () => void | Promise<void>;
+  isRequestingCheckout?: boolean;
+  checkoutToast?: string | null;
 }
 
 function suiteStatusLabel(status?: string, isOccupied?: boolean): string {
@@ -457,171 +466,6 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
   );
 }
 
-function buildCartLineId(item: MenuItem, selectedOptions?: SelectedMenuOption[]): string {
-  if (!selectedOptions?.length) {
-    return item.id;
-  }
-  const optionIds = [...selectedOptions].map((option) => option.optionId).sort((a, b) => a - b);
-  return `${item.id}-${optionIds.join('-')}`;
-}
-
-function ItemOptionsModal({
-  item,
-  t,
-  onClose,
-  onConfirm,
-}: {
-  item: MenuItem;
-  t: (key: string) => string;
-  onClose: () => void;
-  onConfirm: (selectedOptions: SelectedMenuOption[]) => void;
-}) {
-  const groups = item.optionGroups ?? [];
-  const [selectedByGroup, setSelectedByGroup] = useState<Record<number, number[]>>(() => {
-    const initial: Record<number, number[]> = {};
-    for (const group of groups) {
-      initial[group.id] = [];
-    }
-    return initial;
-  });
-
-  const toggleOption = (group: MenuOptionGroup, optionId: number) => {
-    setSelectedByGroup((prev) => {
-      const current = prev[group.id] ?? [];
-      if (group.selectionType === 'single') {
-        return { ...prev, [group.id]: [optionId] };
-      }
-      return current.includes(optionId)
-        ? { ...prev, [group.id]: current.filter((id) => id !== optionId) }
-        : { ...prev, [group.id]: [...current, optionId] };
-    });
-  };
-
-  const isValid = groups.every((group) => {
-    const count = selectedByGroup[group.id]?.length ?? 0;
-    if (group.isRequired) {
-      return count > 0;
-    }
-    return true;
-  });
-
-  const handleConfirm = () => {
-    const selectedOptions: SelectedMenuOption[] = [];
-    for (const group of groups) {
-      const optionIds = selectedByGroup[group.id] ?? [];
-      for (const optionId of optionIds) {
-        const option = group.options.find((entry) => entry.id === optionId);
-        if (option) {
-          selectedOptions.push({
-            optionId: option.id,
-            name: option.name,
-            groupName: group.name,
-          });
-        }
-      }
-    }
-    onConfirm(selectedOptions);
-  };
-
-  return (
-    <motion.div
-      key="options-modal"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.88, y: 12 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.88, y: 12 }}
-        transition={{ type: 'spring', stiffness: 320, damping: 24 }}
-        className="rounded-3xl p-7 w-[420px] max-h-[80vh] overflow-y-auto shadow-2xl"
-        style={{ background: C.bg, border: `1px solid ${C.border}` }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <p className="font-semibold" style={{ color: C.text }}>{item.name}</p>
-            <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{item.category}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
-            style={{ color: C.textLight, background: C.bg2 }}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="space-y-5 mb-6">
-          {groups.map((group) => (
-            <div key={group.id}>
-              <div className="flex items-center gap-2 mb-2">
-                <p className="text-sm font-semibold" style={{ color: C.text }}>{group.name}</p>
-                {group.isRequired && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                    {t('options.required')}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs mb-2" style={{ color: C.textMid }}>
-                {group.selectionType === 'single' ? t('options.selectOne') : t('options.selectMultiple')}
-              </p>
-              <div className="space-y-2">
-                {group.options.map((option) => {
-                  const checked = (selectedByGroup[group.id] ?? []).includes(option.id);
-                  return (
-                    <label
-                      key={option.id}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors"
-                      style={{
-                        borderColor: checked ? C.accent : C.border,
-                        background: checked ? C.accentDim : C.bg2,
-                      }}
-                    >
-                      <input
-                        type={group.selectionType === 'single' ? 'radio' : 'checkbox'}
-                        name={`option-group-${group.id}`}
-                        checked={checked}
-                        onChange={() => toggleOption(group, option.id)}
-                        className="w-4 h-4 accent-[#DCB515]"
-                      />
-                      <span className="text-sm" style={{ color: C.text }}>{option.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 py-3 rounded-2xl text-sm font-medium transition-all"
-            style={btnGhost}
-          >
-            {t('options.cancel')}
-          </button>
-          <button
-            type="button"
-            disabled={!isValid}
-            onClick={handleConfirm}
-            className="flex-1 py-3 rounded-2xl text-sm font-semibold transition-all disabled:opacity-50"
-            style={btnAccent}
-          >
-            {t('options.confirm')}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
 // ── Component ──────────────────────────────────────────────────────────────────
 export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [internalScreen, setInternalScreen] = useState<Screen>('assign');
@@ -641,6 +485,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [notePopupId, setNotePopupId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft]     = useState('');
   const [optionsModalItem, setOptionsModalItem] = useState<MenuItem | null>(null);
+  const [showCheckoutConfirm, setShowCheckoutConfirm] = useState(false);
   const noteTextareaRef               = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -653,6 +498,12 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       setRole('customer');
     }
   }, [live?.hideDemoToggle]);
+
+  useEffect(() => {
+    if (live?.checkoutToast) {
+      setShowCheckoutConfirm(false);
+    }
+  }, [live?.checkoutToast]);
 
   const screen = live?.screen ?? internalScreen;
   const goTo = (next: Screen) => {
@@ -695,8 +546,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     if (category === 'All') {
       return menuSource;
     }
-    // Tabs are active menu section names; item.category is the section name (POS parity).
-    return menuSource.filter((item) => item.category === category);
+    return menuSource.filter((item) => (item.sectionTab ?? item.category) === category);
   }, [menuSource, category]);
 
   const handleSuiteClick = (suiteId: string) => {
@@ -719,7 +569,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       live.onAddItem(item, selectedOptions);
       return;
     }
-    const lineId = buildCartLineId(item, selectedOptions);
+    const lineId = buildCartLineSignatureFromOptions(item.id, selectedOptions);
     const cartItem: CartItem = {
       ...item,
       id: lineId,
@@ -734,7 +584,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   };
 
   const handleMenuCardClick = (item: MenuItem) => {
-    if ((item.optionGroups?.length ?? 0) > 0) {
+    if (hasMenuOptions(item)) {
       setOptionsModalItem(item);
       return;
     }
@@ -1022,6 +872,61 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
         )}
       </AnimatePresence>
 
+      {/* ── Request checkout confirmation ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {showCheckoutConfirm && (
+          <motion.div
+            key="checkout-dialog"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => !live?.isRequestingCheckout && setShowCheckoutConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="rounded-3xl p-6 w-full max-w-md shadow-2xl mx-4"
+              style={{ background: C.bg, border: `1px solid ${C.border}` }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>
+                {translate('checkout.confirmTitle')}
+              </p>
+              <p className="text-sm mb-5" style={{ color: C.textMid }}>
+                {translate('checkout.confirmMessage')}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCheckoutConfirm(false)}
+                  disabled={live?.isRequestingCheckout}
+                  className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px] disabled:opacity-50"
+                  style={btnGhost}
+                >
+                  {translate('checkout.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void live?.onRequestCheckout?.()}
+                  disabled={live?.isRequestingCheckout}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50 border border-red-500 text-red-600 hover:bg-red-50"
+                >
+                  {live?.isRequestingCheckout ? '…' : translate('checkout.confirm')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {live?.checkoutToast && (
+        <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-green-200 bg-green-50 px-5 py-2.5 text-sm font-medium text-green-800 shadow-lg">
+          {live.checkoutToast}
+        </div>
+      )}
+
       {/* ══ ASSIGN ══════════════════════════════════════════════════════════════ */}
       {screen === 'assign' && (
         <div className="h-full flex flex-col">
@@ -1260,14 +1165,25 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <button onClick={() => goTo('welcome')}
                   className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
                   style={btnGhost}>
-                  <ChevronLeft className="w-4 h-4" /> Back
+                  <ChevronLeft className="w-4 h-4" /> {translate('menu.back')}
                 </button>
                 <div className="flex items-center gap-2">
+                  {live?.onRequestCheckout && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCheckoutConfirm(true)}
+                      disabled={live.isRequestingCheckout}
+                      className="flex items-center gap-1.5 border border-red-500 text-red-600 px-4 py-2 rounded-full text-sm font-medium transition-all hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Bell className="w-4 h-4" />
+                      {translate('checkout.request')}
+                    </button>
+                  )}
                   <button onClick={() => goTo('history')}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm transition-all"
                     style={btnGhost}>
                     <History className="w-4 h-4" />
-                    History
+                    {translate('menu.history')}
                     {orders.length > 0 && (
                       <span className="text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
                         style={{ background: C.accent, color: C.bg }}>{orders.length}</span>
@@ -1277,7 +1193,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all"
                     style={cartCount > 0 ? btnAccent : { ...btnGhost, opacity: 0.5, cursor: 'default' }}>
                     <ShoppingCart className="w-4 h-4" />
-                    Cart
+                    {translate('menu.cart')}
                     {cartCount > 0 && (
                       <span className="text-xs font-bold px-1.5 py-0.5 rounded-full"
                         style={{ background: C.bg, color: C.accent }}>{cartCount}</span>
@@ -1348,6 +1264,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <p className="font-semibold text-sm leading-tight" style={{ color: C.text }}>{item.name}</p>
+                              {hasMenuOptions(item) && (
+                                <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">
+                                  {translate('menu.options')}
+                                </span>
+                              )}
                               {(item.dietaryTags ?? []).map((tag) => (
                                 <span
                                   key={`${item.id}-${tag}`}
@@ -1357,7 +1278,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                                 </span>
                               ))}
                             </div>
-                            <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>{item.category}</p>
+                            <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>{item.posCategoryName ?? item.category}</p>
                             {allergenText && (
                               <p className={`text-[10px] leading-tight mt-0.5 line-clamp-2 ${warn ? 'text-red-600' : ''}`}
                                 style={warn ? undefined : { color: C.textMid }}>
@@ -1476,6 +1397,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm" style={{ color: C.text }}>{item.name}</p>
                       <p className="text-xs" style={{ color: C.textMid }}>{item.category}</p>
+                      {item.selectedOptions?.length ? (
+                        <p className="text-xs mt-0.5" style={{ color: C.textMid }}>
+                          {item.selectedOptions.map((option) => option.name).join(', ')}
+                        </p>
+                      ) : null}
                     </div>
                     {/* Custom button */}
                     <button onClick={() => openNotePopup(item)}
@@ -1493,7 +1419,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         <Minus className="w-3.5 h-3.5" />
                       </button>
                       <span className="w-6 text-center font-bold" style={{ color: C.text }}>{item.qty}</span>
-                      <button onClick={() => addItem(item)}
+                      <button onClick={() => addItem(item, item.selectedOptions)}
                         className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-all"
                         style={btnAccent}>
                         <Plus className="w-3.5 h-3.5" />
