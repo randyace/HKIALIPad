@@ -1298,8 +1298,6 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">Loading suite details…</span>
                 </div>
-              ) : live?.occupiedSessionError ? (
-                <p className="text-sm text-center py-8 text-red-600">{live.occupiedSessionError}</p>
               ) : live?.occupiedSession ? (
                 <div className="space-y-4">
                   <div
@@ -1361,7 +1359,15 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     )}
                   </div>
                 </div>
-              ) : null}
+              ) : live?.occupiedSessionError ? (
+                <p className="text-sm text-center py-8 text-amber-700">
+                  {live.occupiedSessionError} You can still load this suite below.
+                </p>
+              ) : (
+                <p className="text-sm text-center py-8" style={{ color: C.textMid }}>
+                  Session details are unavailable on this server. You can still load this suite below.
+                </p>
+              )}
 
               {live?.loadSuiteError ? (
                 <p className="text-sm mt-4 text-center text-red-600">{live.loadSuiteError}</p>
@@ -1379,7 +1385,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <button
                   type="button"
                   onClick={() => void live?.onLoadOccupiedSuite?.()}
-                  disabled={live?.isLoadingOccupiedSession || Boolean(live?.occupiedSessionError) || live?.isLoadingSuite}
+                  disabled={live?.isLoadingOccupiedSession || live?.isLoadingSuite}
                   className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                   style={btnAccent}
                 >
