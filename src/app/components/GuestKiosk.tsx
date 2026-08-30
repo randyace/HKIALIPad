@@ -353,6 +353,7 @@ export interface GuestKioskLiveConfig {
   onRequestCheckout?: () => void | Promise<void>;
   isRequestingCheckout?: boolean;
   checkoutToast?: string | null;
+  onHiddenStaffTrigger?: () => void;
 }
 
 function suiteStatusLabel(
@@ -508,13 +509,52 @@ function KioskHeader({
   subtitle,
   languageSwitcher,
   logoAlt = 'HKIA VIP Lounge',
+  onHiddenStaffTrigger,
 }: {
   subtitle?: string;
   languageSwitcher?: ReactNode;
   logoAlt?: string;
+  onHiddenStaffTrigger?: () => void;
 }) {
+  const clickCountRef = useRef(0);
+  const clickTimerRef = useRef<number | null>(null);
+
+  const handleHiddenZoneClick = () => {
+    if (!onHiddenStaffTrigger) {
+      return;
+    }
+
+    clickCountRef.current += 1;
+
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+    }
+
+    if (clickCountRef.current >= 3) {
+      clickCountRef.current = 0;
+      clickTimerRef.current = null;
+      onHiddenStaffTrigger();
+      return;
+    }
+
+    clickTimerRef.current = window.setTimeout(() => {
+      clickCountRef.current = 0;
+      clickTimerRef.current = null;
+    }, 1500);
+  };
+
   return (
     <div className="relative flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
+      {onHiddenStaffTrigger && (
+        <button
+          type="button"
+          data-testid="staff-pin-trigger"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={handleHiddenZoneClick}
+          className={`absolute top-0 z-20 h-16 w-20 cursor-default opacity-0 ${languageSwitcher ? 'right-24' : 'right-0'}`}
+        />
+      )}
       {languageSwitcher && (
         <div className="absolute top-4 right-4 z-10">
           {languageSwitcher}
@@ -1577,6 +1617,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         autoComplete="username"
                         value={staffEmail}
                         onChange={(e) => setStaffEmail(e.target.value)}
+                        placeholder={translate('login.email_placeholder')}
                         className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
                         style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
                         required
@@ -1590,6 +1631,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         autoComplete="current-password"
                         value={staffPassword}
                         onChange={(e) => setStaffPassword(e.target.value)}
+                        placeholder={translate('login.password_placeholder')}
                         className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
                         style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
                         required
@@ -1741,7 +1783,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ WELCOME ═════════════════════════════════════════════════════════════ */}
       {screen === 'welcome' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} onHiddenStaffTrigger={live?.onHiddenStaffTrigger} />
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left — greeting */}
@@ -1812,7 +1854,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ MENU ════════════════════════════════════════════════════════════════ */}
       {screen === 'menu' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} onHiddenStaffTrigger={live?.onHiddenStaffTrigger} />
 
           <div className="flex-1 flex overflow-hidden">
             {/* Left — menu */}
@@ -2034,7 +2076,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CART ════════════════════════════════════════════════════════════════ */}
       {screen === 'cart' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} onHiddenStaffTrigger={live?.onHiddenStaffTrigger} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border }}>
             <button onClick={() => goTo('menu')}
@@ -2141,7 +2183,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CONFIRM ═════════════════════════════════════════════════════════════ */}
       {screen === 'confirm' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} onHiddenStaffTrigger={live?.onHiddenStaffTrigger} />
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center" style={{ background: C.bg2 }}>
             <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -2197,7 +2239,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ HISTORY ═════════════════════════════════════════════════════════════ */}
       {screen === 'history' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} onHiddenStaffTrigger={live?.onHiddenStaffTrigger} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
             <button onClick={() => goTo('menu')} className="p-2 rounded-xl transition-colors" style={btnGhost}>
