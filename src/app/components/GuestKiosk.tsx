@@ -7,6 +7,7 @@ import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
 import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 import { PreOrderDispatchDialog } from '@/components/PreOrderDispatchDialog';
+import { ConflictAlertList } from '@/components/ConflictAlertList';
 import { MenuCardSkeletonGrid } from '@/components/MenuCardSkeleton';
 import {
   bookingRequiresLoungeAssignment,
@@ -234,7 +235,20 @@ export interface KioskBooking {
 export interface GuestKioskLiveConfig {
   screen: Screen;
   navigate: (screen: Screen) => void;
-  suites: { id: string; name: string; kind: string; status?: string; isOccupied?: boolean }[];
+  suites: {
+    id: string;
+    name: string;
+    kind: string;
+    status?: string;
+    isOccupied?: boolean;
+    hasConflict?: boolean;
+    reservedBooking?: {
+      booking_id: number;
+      guest_name: string;
+      pax: number;
+      flight_no: string | null;
+    } | null;
+  }[];
   selectedSuiteId: string;
   onSelectSuite: (id: string) => void;
   onAssignBooking?: (
@@ -270,6 +284,9 @@ export interface GuestKioskLiveConfig {
   onCancelAssignment?: () => void;
   onPairSuite?: (suiteId: string, bookingId: number | null) => void | Promise<void>;
   onOccupiedSuiteOpen?: (suiteId: string) => void;
+  onSuiteConflictOpen?: (suiteId: string) => void;
+  onConflictReassignOpen?: (suite: GuestKioskLiveConfig['suites'][number]) => void;
+  onReservedSuiteOpen?: (suiteId: string) => void;
   onOccupiedDialogClose?: () => void;
   onLoadOccupiedSuite?: () => void | Promise<void>;
   occupiedSession?: {
@@ -430,7 +447,7 @@ function suiteStatusBadgeClass(status?: string, isOccupied?: boolean): string {
     return 'bg-orange-100 text-orange-800';
   }
   if (normalized === 'reserved') {
-    return 'bg-blue-100 text-blue-800';
+    return 'bg-indigo-100 text-indigo-700';
   }
   return 'bg-green-100 text-green-800';
 }
@@ -465,6 +482,27 @@ function canOpenBookingDialog(status?: string, isOccupied?: boolean): boolean {
   }
 
   return normalized === 'available' || normalized === 'cleaning';
+}
+
+function isReservedDisplay(status?: string): boolean {
+  return String(status ?? '').toLowerCase() === 'reserved';
+}
+
+function isReservedSuite(status?: string, isOccupied?: boolean): boolean {
+  return isReservedDisplay(status) && !isOccupied;
+}
+
+function suiteCardSurfaceClass(status?: string, hasConflict?: boolean): string {
+  if (!isReservedDisplay(status)) {
+    return '';
+  }
+
+  const base = 'bg-indigo-50 border-indigo-300';
+  if (hasConflict) {
+    return `${base} border-red-500 ring-2 ring-red-200`;
+  }
+
+  return base;
 }
 
 function isOccupiedSuite(status?: string, isOccupied?: boolean): boolean {
@@ -880,9 +918,19 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       return;
     }
 
+    if (live?.onSuiteConflictOpen && suite?.hasConflict) {
+      live.onSuiteConflictOpen(suiteId);
+      return;
+    }
+
     if (live && (live.onAssignBooking || live.onPairSuite) && isOccupiedSuite(suite?.status, suite?.isOccupied)) {
       live.onOccupiedSuiteOpen?.(suiteId);
       setShowOccupiedDialog(true);
+      return;
+    }
+
+    if (live?.onReservedSuiteOpen && isReservedSuite(suite?.status, suite?.isOccupied)) {
+      live.onReservedSuiteOpen(suiteId);
       return;
     }
 
@@ -1677,6 +1725,14 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 )}
               </div>
 
+              {live?.onConflictReassignOpen && !assignmentMode ? (
+                <ConflictAlertList
+                  suites={suiteList}
+                  onResolve={live.onConflictReassignOpen}
+                  t={translate}
+                />
+              ) : null}
+
               <div className="mb-4 rounded-2xl p-4 md:p-6" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
                 <label className="text-xs uppercase tracking-wider block mb-3" style={{ color: C.textMid }}>
                   {translate('assign.section_title')}
@@ -1692,10 +1748,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   {suiteList.map(s => {
                     const statusLabel = suiteStatusLabel(s.status, s.isOccupied, translate);
                     const badgeClass = suiteStatusBadgeClass(s.status, s.isOccupied);
+                    const reservedCardClass = suiteCardSurfaceClass(s.status, s.hasConflict);
                     const suiteNumericId = Number(s.id);
                     const isAvailableForAssignment = canOpenBookingDialog(s.status, s.isOccupied);
                     const isAssignmentDisabled = assignmentMode && !isAvailableForAssignment;
                     const isAssignmentSelected = assignmentMode && assignmentSelectedSuiteIds.includes(suiteNumericId);
+                    const reservedGuestName = s.reservedBooking?.guest_name;
+                    const showConflictAlert = Boolean(s.hasConflict && isReservedDisplay(s.status));
                     return (
                     <button
                       key={s.id}
@@ -1713,15 +1772,26 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         }
                       }}
                       disabled={isAssignmentDisabled}
-                      className={`flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px] ${
+                      className={`relative flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all text-left active:scale-[0.98] min-h-[44px] ${
                         isAssignmentDisabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''
                       } ${
                         isAssignmentSelected ? 'ring-4 ring-blue-500 border-blue-500' : ''
-                      }`}
+                      } ${reservedCardClass}`}
                       style={!assignmentMode && selectedSuiteId === s.id
                         ? { background: C.accentDim, borderColor: C.accent, color: C.text }
-                        : { background: C.bg, borderColor: isAssignmentSelected ? '#3b82f6' : C.border, color: C.textMid }}
+                        : reservedCardClass
+                          ? undefined
+                          : { background: C.bg, borderColor: isAssignmentSelected ? '#3b82f6' : C.border, color: C.textMid }}
                     >
+                      {showConflictAlert ? (
+                        <span
+                          className="absolute top-2 right-2 text-red-600"
+                          aria-hidden="true"
+                          title={translate('conflict.title')}
+                        >
+                          <AlertTriangle className="w-4 h-4" />
+                        </span>
+                      ) : null}
                       <div className="flex w-full items-start justify-between gap-2">
                         <span className="text-sm font-medium">{s.name}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${badgeClass}`}>
@@ -1729,6 +1799,9 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         </span>
                       </div>
                       <span className="text-xs opacity-60">{suiteTypeLabel(s, translate)}</span>
+                      {reservedGuestName ? (
+                        <span className="text-xs text-indigo-900 truncate w-full">{reservedGuestName}</span>
+                      ) : null}
                     </button>
                     );
                   })}
