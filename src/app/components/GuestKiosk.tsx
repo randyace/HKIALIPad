@@ -7,10 +7,12 @@ import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
 import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 import { PreOrderDispatchDialog } from '@/components/PreOrderDispatchDialog';
+import { MenuCardSkeletonGrid } from '@/components/MenuCardSkeleton';
 import {
   bookingRequiresLoungeAssignment,
   evaluateLoungePreorderAssignment,
   hasLoungeAmongSuiteIds,
+  isLoungeSuiteTile,
   resolvePreorderAssignSuiteIds,
   shouldUseMultiSuitePreorderAssign,
 } from '@/lib/suiteAssignment';
@@ -326,10 +328,11 @@ export interface GuestKioskLiveConfig {
   assignedSuite: { name: string; kind: string } | null;
   guestName: string;
   guestAllergies?: string[];
-  t?: (key: string) => string;
+  t?: (key: string, values?: Record<string, string | number>) => string;
   headerLanguageSwitcher?: ReactNode;
   welcomeLanguageSwitcher?: ReactNode;
   menuItems: MenuItem[];
+  isLoadingMenu?: boolean;
   menuSections?: Array<{ id: number; name: string }>;
   categories: string[];
   cart: CartItem[];
@@ -352,27 +355,65 @@ export interface GuestKioskLiveConfig {
   checkoutToast?: string | null;
 }
 
-function suiteStatusLabel(status?: string, isOccupied?: boolean): string {
+function suiteStatusLabel(
+  status: string | undefined,
+  isOccupied: boolean | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
   const normalized = String(status ?? '').toLowerCase();
   if (isOccupied || normalized === 'occupied') {
-    return 'Occupied';
+    return t('status.occupied');
   }
   if (normalized === 'food-served') {
-    return 'Food Served';
+    return t('status.food_served');
   }
   if (normalized === 'cleaning') {
-    return 'Cleaning';
+    return t('status.cleaning');
   }
   if (normalized === 'reserved') {
-    return 'Reserved';
+    return t('status.reserved');
   }
   if (normalized === 'walk-in' || normalized === 'walkin') {
-    return 'Walk-in';
+    return t('status.walk_in');
   }
   if (normalized === 'available') {
-    return 'Available';
+    return t('status.available');
   }
-  return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Available';
+  return status ? status.charAt(0).toUpperCase() + status.slice(1) : t('status.available');
+}
+
+function suiteTypeLabel(
+  suite: { name: string; kind?: string | null },
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  return isLoungeSuiteTile(suite) ? t('type.lounge') : t('type.suite');
+}
+
+function translateKitchenStatus(
+  status: string | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const normalized = (status ?? '').toLowerCase();
+  if (normalized === 'served') {
+    return t('order.status_served');
+  }
+  if (normalized === 'preparing') {
+    return t('order.status_preparing');
+  }
+  return t('order.status_pending');
+}
+
+function aggregateOrderKitchenStatus(
+  items: Array<{ kitchenStatus?: string }>,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (items.every((item) => (item.kitchenStatus ?? '').toLowerCase() === 'served')) {
+    return t('order.status_served');
+  }
+  if (items.some((item) => (item.kitchenStatus ?? '').toLowerCase() === 'preparing')) {
+    return t('order.status_preparing');
+  }
+  return t('order.status_pending');
 }
 
 /** Tailwind badge classes aligned with POS Floor Plan legend. */
@@ -466,9 +507,11 @@ function ProductThumbnail({
 function KioskHeader({
   subtitle,
   languageSwitcher,
+  logoAlt = 'HKIA VIP Lounge',
 }: {
   subtitle?: string;
   languageSwitcher?: ReactNode;
+  logoAlt?: string;
 }) {
   return (
     <div className="relative flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
@@ -477,7 +520,7 @@ function KioskHeader({
           {languageSwitcher}
         </div>
       )}
-      <img src={logoImg} alt="HKIA VIP Lounge" className="h-10 mb-2" />
+      <img src={logoImg} alt={logoAlt} className="h-10 mb-2" />
       
       {subtitle && (
         <p className="text-xs mt-0.5 tracking-widest uppercase" style={{ color: C.accent }}>{subtitle}</p>
@@ -487,7 +530,13 @@ function KioskHeader({
 }
 
 // ── Info panel (shared between welcome & menu screens) ─────────────────────────
-function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
+function InfoPanel({
+  booking = MOCK_BOOKING,
+  t,
+}: {
+  booking?: KioskBooking;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
   return (
     <div className="w-72 flex flex-col overflow-y-auto shrink-0 border-l" style={{ borderColor: C.border, background: C.bg2 }}>
 
@@ -495,7 +544,7 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
       <div className="p-4 border-b" style={{ borderColor: C.border }}>
         <div className="flex items-center gap-1.5 mb-3">
           <User className="w-3.5 h-3.5" style={{ color: C.textMid }} />
-          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>Member</span>
+          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>{t('info.member')}</span>
         </div>
         <div className="flex items-start justify-between gap-2 mb-2">
           <div>
@@ -520,16 +569,16 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
       <div className="p-4 border-b" style={{ borderColor: C.border }}>
         <div className="flex items-center gap-1.5 mb-3">
           <MapPin className="w-3.5 h-3.5" style={{ color: C.textMid }} />
-          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>Booking</span>
+          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>{t('info.booking')}</span>
         </div>
         <p className="text-xs font-mono font-semibold mb-3" style={{ color: C.accent }}>{booking.bookingNo}</p>
         <div className="space-y-2">
           {[
-            { icon: Clock,  label: 'Check-in',    val: booking.checkInTime },
-            { icon: Users,  label: 'Guests',       val: `${booking.numberOfGuests} pax` },
-            { icon: Plane,  label: 'Flight',        val: booking.flightNo },
-            { icon: null,   label: 'Departure',    val: booking.flightTime },
-            { icon: null,   label: 'Destination',  val: booking.flightDestination },
+            { icon: Clock,  label: t('info.check_in'),    val: booking.checkInTime },
+            { icon: Users,  label: t('info.guests'),       val: t('occupied_dialog.pax', { count: booking.numberOfGuests }) },
+            { icon: Plane,  label: t('info.flight'),        val: booking.flightNo },
+            { icon: null,   label: t('info.departure'),    val: booking.flightTime },
+            { icon: null,   label: t('info.destination'),  val: booking.flightDestination },
           ].map(({ icon: Icon, label, val }) => (
             <div key={label} className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5" style={{ color: C.textMid }}>
@@ -545,7 +594,7 @@ function InfoPanel({ booking = MOCK_BOOKING }: { booking?: KioskBooking }) {
       <div className="p-4">
         <div className="flex items-center gap-1.5 mb-3">
           <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-          <span className="text-xs uppercase tracking-wider text-red-500">Allergies & Dietary</span>
+          <span className="text-xs uppercase tracking-wider text-red-500">{t('info.allergies_dietary')}</span>
         </div>
         <div className="space-y-3">
           {booking.guestProfiles.map((guest, i) =>
@@ -671,7 +720,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const categoryList = live ? (live.categories ?? ['All']) : CATEGORIES;
   const bookingData = live?.booking ?? MOCK_BOOKING;
   const guestDisplayName = live?.guestName ?? MOCK_BOOKING.memberName;
-  const translate = (key: string) => live?.t?.(key) ?? key;
+  const translate = (key: string, values?: Record<string, string | number>) =>
+    live?.t?.(key, values) ?? key;
 
   const filteredUnassignedBookings = useMemo(() => {
     const bookings = live?.unassignedBookings ?? [];
@@ -1083,13 +1133,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 </div>
 
                 <label className="text-xs uppercase tracking-wider block mb-2" style={{ color: C.textMid }}>
-                  Custom Instructions
+                  {translate('custom_instruction.label')}
                 </label>
                 <textarea
                   ref={noteTextareaRef}
                   value={noteDraft}
                   onChange={e => setNoteDraft(e.target.value)}
-                  placeholder="e.g. Extra hot, no sugar, oat milk…"
+                  placeholder={translate('custom_instruction.placeholder')}
                   rows={4}
                   className="w-full px-4 py-3 text-sm resize-none focus:outline-none rounded-2xl mb-5"
                   style={{ background: C.bg2, border: `1.5px solid ${C.border}`, color: C.text }}
@@ -1101,12 +1151,12 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   <button onClick={() => setNotePopupId(null)}
                     className="flex-1 py-3 rounded-2xl text-sm font-medium transition-all active:scale-[0.98]"
                     style={btnGhost}>
-                    Cancel
+                    {translate('common.cancel')}
                   </button>
                   <button onClick={saveNote}
                     className="flex-1 py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
                     style={btnAccent}>
-                    Save
+                    {translate('common.save')}
                   </button>
                 </div>
               </motion.div>
@@ -1148,10 +1198,9 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               style={{ background: C.bg, border: `1px solid ${C.border}` }}
               onClick={(e) => e.stopPropagation()}
             >
-              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>Select Booking</p>
+              <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>{translate('booking.select_title')}</p>
               <p className="text-sm mb-4" style={{ color: C.textMid }}>
-                Link a reservation to this suite, or start as a walk-in. Showing visits for{' '}
-                {formatBookingDateLabel(selectedDate)}.
+                {translate('booking.subtitle', { date: formatBookingDateLabel(selectedDate) })}
               </p>
 
               <button
@@ -1166,8 +1215,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   color: C.text,
                 }}
               >
-                <span className="font-semibold">Walk-in (No Booking)</span>
-                <span className="block text-xs mt-0.5" style={{ color: C.textMid }}>No linked reservation</span>
+                <span className="font-semibold">{translate('booking.walk_in')}</span>
+                <span className="block text-xs mt-0.5" style={{ color: C.textMid }}>{translate('booking.walk_in_hint')}</span>
               </button>
 
               <div className="sticky top-0 z-10 mb-3 flex gap-3 items-center w-full">
@@ -1179,10 +1228,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     type="search"
                     value={bookingSearchQuery}
                     onChange={(event) => setBookingSearchQuery(event.target.value)}
-                    placeholder="Search guest, member ID, booking no., flight…"
+                    placeholder={translate('booking.search_placeholder')}
                     className="w-full bg-transparent text-sm outline-none min-h-[48px]"
                     style={{ color: C.text }}
-                    aria-label="Search bookings"
+                    aria-label={translate('booking.search_aria')}
                   />
                 </div>
                 <div className="w-48 shrink-0">
@@ -1191,7 +1240,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     onChange={setSelectedDate}
                     isClearable={false}
                     data-testid="booking-visit-date"
-                    aria-label="Visit date"
+                    aria-label={translate('booking.visit_date_aria')}
                     className={BOOKING_FILTER_INPUT_CLASS}
                     dateFormat="dd/MM/yyyy"
                   />
@@ -1199,7 +1248,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               </div>
 
               {live?.isLoadingUnassignedBookings ? (
-                <p className="text-sm text-center py-4" style={{ color: C.textMid }}>Loading bookings…</p>
+                <p className="text-sm text-center py-4" style={{ color: C.textMid }}>{translate('booking.loading')}</p>
               ) : (
                 <div className="max-h-72 overflow-y-auto space-y-2 mb-4">
                   {filteredUnassignedBookings.map((booking) => (
@@ -1221,18 +1270,18 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         <span className="text-xs shrink-0" style={{ color: C.textMid }}>{booking.booking_number}</span>
                       </div>
                       <span className="text-xs block mt-0.5" style={{ color: C.textMid }}>
-                        {booking.member_id ? `Member ${booking.member_id} · ` : ''}
+                        {booking.member_id ? translate('booking.member_prefix', { id: booking.member_id }) : ''}
                         {booking.flight_number ?? '—'}
                         {booking.flight_time ? ` · ${booking.flight_time}` : ''}
-                        {` · ${booking.pax} pax`}
+                        {` · ${translate('occupied_dialog.pax', { count: booking.pax })}`}
                       </span>
                     </button>
                   ))}
                   {filteredUnassignedBookings.length === 0 && (
                     <p className="text-xs text-center py-2" style={{ color: C.textMid }}>
                       {bookingSearchQuery.trim()
-                        ? 'No bookings match your search.'
-                        : `No unassigned bookings for ${formatBookingDateLabel(selectedDate)}.`}
+                        ? translate('booking.no_search_results')
+                        : translate('booking.no_bookings_for_date', { date: formatBookingDateLabel(selectedDate) })}
                     </p>
                   )}
                 </div>
@@ -1249,7 +1298,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px]"
                   style={btnGhost}
                 >
-                  Cancel
+                  {translate('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -1258,7 +1307,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                   style={btnAccent}
                 >
-                  {live?.isAssigning ? 'Assigning…' : 'Assign & Start Guest Mode'}
+                  {live?.isAssigning ? translate('booking.assigning') : translate('booking.assign_start')}
                 </button>
               </div>
             </motion.div>
@@ -1286,17 +1335,21 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               onClick={(event) => event.stopPropagation()}
             >
               <p className="text-lg font-semibold mb-1" style={{ color: C.text }}>
-                Occupied Suite
+                {translate('occupied_dialog.title')}
               </p>
               <p className="text-sm mb-4" style={{ color: C.textMid }}>
-                {suiteList.find((suite) => suite.id === selectedSuiteId)?.name ?? live?.occupiedSession?.suite_name ?? 'Suite'}{' '}
-                is already in use. Review the current session and load this iPad to the guest menu.
+                {translate('occupied_dialog.subtitle', {
+                  suiteName:
+                    suiteList.find((suite) => suite.id === selectedSuiteId)?.name ??
+                    live?.occupiedSession?.suite_name ??
+                    translate('type.suite_fallback'),
+                })}
               </p>
 
               {live?.isLoadingOccupiedSession ? (
                 <div className="flex items-center justify-center gap-2 py-10" style={{ color: C.textMid }}>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm">Loading suite details…</span>
+                  <span className="text-sm">{translate('occupied_dialog.loading_details')}</span>
                 </div>
               ) : live?.occupiedSession ? (
                 <div className="space-y-4">
@@ -1305,24 +1358,26 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     style={{ background: C.bg2, borderColor: C.border }}
                   >
                     <div>
-                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Guest</p>
+                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>{translate('occupied_dialog.guest_label')}</p>
                       <p className="text-base font-semibold" style={{ color: C.text }}>
                         {live.occupiedSession.guest_name}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Booking</p>
+                      <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>{translate('occupied_dialog.booking_label')}</p>
                       <p className="text-base font-semibold" style={{ color: C.text }}>
-                        {live.occupiedSession.booking_number ?? 'Walk-in'}
+                        {live.occupiedSession.booking_number ?? translate('booking.walk_in_short')}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4" style={{ color: C.textMid }} />
-                      <span className="text-sm" style={{ color: C.text }}>{live.occupiedSession.pax} pax</span>
+                      <span className="text-sm" style={{ color: C.text }}>
+                        {translate('occupied_dialog.pax', { count: live.occupiedSession.pax })}
+                      </span>
                     </div>
                     {live.occupiedSession.member_id ? (
                       <div>
-                        <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Member ID</p>
+                        <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>{translate('occupied_dialog.member_id_label')}</p>
                         <p className="text-sm font-medium" style={{ color: C.text }}>{live.occupiedSession.member_id}</p>
                       </div>
                     ) : null}
@@ -1331,10 +1386,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   <div className="rounded-2xl border p-4" style={{ borderColor: C.border }}>
                     <div className="flex items-center gap-2 mb-3">
                       <UtensilsCrossed className="w-4 h-4" style={{ color: C.accent }} />
-                      <p className="text-sm font-semibold" style={{ color: C.text }}>Ordered Items</p>
+                      <p className="text-sm font-semibold" style={{ color: C.text }}>{translate('occupied_dialog.ordered_items')}</p>
                     </div>
                     {live.occupiedSession.ordered_items.length === 0 ? (
-                      <p className="text-sm" style={{ color: C.textMid }}>No live orders on this suite yet.</p>
+                      <p className="text-sm" style={{ color: C.textMid }}>{translate('occupied_dialog.no_orders')}</p>
                     ) : (
                       <div className="space-y-2 max-h-48 overflow-y-auto">
                         {live.occupiedSession.ordered_items.map((item, index) => (
@@ -1351,7 +1406,9 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                             </div>
                             <div className="text-right shrink-0">
                               <p className="text-sm font-semibold" style={{ color: C.text }}>x{item.quantity}</p>
-                              <p className="text-[11px] capitalize" style={{ color: C.textMid }}>{item.kitchen_status}</p>
+                              <p className="text-[11px] capitalize" style={{ color: C.textMid }}>
+                                {translateKitchenStatus(item.kitchen_status, translate)}
+                              </p>
                             </div>
                           </div>
                         ))}
@@ -1361,11 +1418,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 </div>
               ) : live?.occupiedSessionError ? (
                 <p className="text-sm text-center py-8 text-amber-700">
-                  {live.occupiedSessionError} You can still load this suite below.
+                  {live.occupiedSessionError} {translate('occupied_dialog.load_anyway_suffix')}
                 </p>
               ) : (
                 <p className="text-sm text-center py-8" style={{ color: C.textMid }}>
-                  Session details are unavailable on this server. You can still load this suite below.
+                  {translate('occupied_dialog.session_unavailable')}
                 </p>
               )}
 
@@ -1380,7 +1437,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px] border"
                   style={{ borderColor: C.border, color: C.textMid, background: C.bg }}
                 >
-                  Cancel
+                  {translate('occupied_dialog.cancel')}
                 </button>
                 <button
                   type="button"
@@ -1389,7 +1446,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                   style={btnAccent}
                 >
-                  {live?.isLoadingSuite ? 'Loading…' : 'Load this Suite'}
+                  {live?.isLoadingSuite ? translate('common.loading') : translate('occupied_dialog.load_suite')}
                 </button>
               </div>
             </motion.div>
@@ -1474,29 +1531,35 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
       {/* ══ ASSIGN ══════════════════════════════════════════════════════════════ */}
       {screen === 'assign' && (
-        <div className={`h-full flex flex-col ${assignmentMode ? 'pb-28' : ''}`}>
+        <div className={`relative min-h-full flex flex-col ${assignmentMode ? 'pb-28' : ''}`}>
+          {live?.welcomeLanguageSwitcher && (
+            <div className="absolute top-6 right-6 z-10">
+              {live.welcomeLanguageSwitcher}
+            </div>
+          )}
           {/* Header with logo */}
-          <div className="flex flex-col items-center py-6 border-b" style={{ borderColor: C.border }}>
-            <img src={logoImg} alt="HKIA VIP Lounge" className="h-12 mb-3" />
+          <div className="flex shrink-0 flex-col items-center border-b py-6" style={{ borderColor: C.border }}>
+            <img src={logoImg} alt={translate('brand.lounge_name')} className="h-12 mb-3" />
             <p className="text-sm tracking-[0.15em] uppercase font-medium" style={{ color: C.text }}>
-              Hong Kong International Airport Lounge
+              {translate('brand.airport_name')}
             </p>
             <p className="text-xs tracking-[0.2em] uppercase mt-1" style={{ color: C.accent }}>
-              iPad Suite Assignment
+              {translate('assign.brand_tagline')}
             </p>
           </div>
 
-          <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
-            <div className="w-full max-w-lg">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-8">
+            <div className="mx-auto w-full max-w-7xl">
               {live && !live.isStaffAuthenticated ? (
+                <div className="mx-auto w-full max-w-lg">
                 <div className="rounded-2xl p-6" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center gap-3 mb-5">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
                       <Lock className="w-5 h-5" style={{ color: C.accent }} />
                     </div>
                     <div>
-                      <p className="font-semibold" style={{ color: C.text }}>Staff Login</p>
-                      <p className="text-xs" style={{ color: C.textMid }}>Sign in to assign this iPad</p>
+                      <p className="font-semibold" style={{ color: C.text }}>{translate('login.title')}</p>
+                      <p className="text-xs" style={{ color: C.textMid }}>{translate('login.subtitle')}</p>
                     </div>
                   </div>
                   <form
@@ -1507,7 +1570,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="space-y-3"
                   >
                     <div>
-                      <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>Email</label>
+                      <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.email_label')}</label>
                       <input
                         id="staff-login-email"
                         type="email"
@@ -1520,7 +1583,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       />
                     </div>
                     <div>
-                      <label htmlFor="staff-login-password" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>Password</label>
+                      <label htmlFor="staff-login-password" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.password_label')}</label>
                       <input
                         id="staff-login-password"
                         type="password"
@@ -1541,22 +1604,23 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
                       style={btnAccent}
                     >
-                      {live.isStaffLoggingIn ? 'Signing in…' : 'Sign In'}
+                      {live.isStaffLoggingIn ? translate('login.signing_in') : translate('login.submit_button')}
                     </button>
                   </form>
                 </div>
+                </div>
               ) : (
               <>
-              <div className="flex items-center gap-3 mb-6">
+              <div className="mb-6 flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
                   <Tablet className="w-5 h-5" style={{ color: C.accent }} />
                 </div>
                 <div className="flex-1">
-                  <p className="font-semibold" style={{ color: C.text }}>Assign Suite to this iPad</p>
+                  <p className="font-semibold" style={{ color: C.text }}>{translate('assign.title')}</p>
                   <p className="text-xs" style={{ color: C.textMid }}>
                     {assignmentMode
-                      ? 'Tap available suites to add them to this assignment'
-                      : 'Tap a suite to link a booking or walk-in'}
+                      ? translate('assign.subtitle_multi')
+                      : translate('assign.subtitle')}
                   </p>
                 </div>
                 {live?.onStaffLogout && (
@@ -1566,25 +1630,25 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="text-xs px-3 py-1.5 rounded-lg min-h-[44px]"
                     style={btnGhost}
                   >
-                    Log out
+                    {translate('assign.logout')}
                   </button>
                 )}
               </div>
 
-              <div className="rounded-2xl p-6 mb-4" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+              <div className="mb-4 rounded-2xl p-4 md:p-6" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
                 <label className="text-xs uppercase tracking-wider block mb-3" style={{ color: C.textMid }}>
-                  Select Suite / Lobby
+                  {translate('assign.section_title')}
                 </label>
                 {live?.isLoadingSuites ? (
-                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>Loading suites…</p>
+                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>{translate('assign.loading_suites')}</p>
                 ) : live?.suitesLoadError ? (
                   <p className="text-sm mb-2 text-center text-red-600">{live.suitesLoadError}</p>
                 ) : suiteList.length === 0 ? (
-                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>No active suites found.</p>
+                  <p className="text-sm mb-2 text-center" style={{ color: C.textMid }}>{translate('assign.no_suites')}</p>
                 ) : (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {suiteList.map(s => {
-                    const statusLabel = suiteStatusLabel(s.status, s.isOccupied);
+                    const statusLabel = suiteStatusLabel(s.status, s.isOccupied, translate);
                     const badgeClass = suiteStatusBadgeClass(s.status, s.isOccupied);
                     const suiteNumericId = Number(s.id);
                     const isAvailableForAssignment = canOpenBookingDialog(s.status, s.isOccupied);
@@ -1622,14 +1686,14 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                           {statusLabel}
                         </span>
                       </div>
-                      <span className="text-xs opacity-60">{s.kind}</span>
+                      <span className="text-xs opacity-60">{suiteTypeLabel(s, translate)}</span>
                     </button>
                     );
                   })}
                 </div>
                 )}
               </div>
-              <p className="text-center text-xs" style={{ color: C.textLight }}>Staff only — guests will see the ordering screen</p>
+              <p className="text-center text-xs" style={{ color: C.textLight }}>{translate('assign.staff_only_note')}</p>
               </>
               )}
             </div>
@@ -1640,8 +1704,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               <div className="mx-auto flex w-full max-w-lg flex-col gap-3">
                 <p className="text-sm font-semibold text-center" style={{ color: C.text }}>
                   {suitesRemainingCount > 0
-                    ? `Please select ${suitesRemainingCount} more suite${suitesRemainingCount === 1 ? '' : 's'} for ${pendingAssignmentBooking.guest_name}`
-                    : `All suites selected for ${pendingAssignmentBooking.guest_name}`}
+                    ? translate(
+                        suitesRemainingCount === 1 ? 'assign.select_more_suites' : 'assign.select_more_suites_plural',
+                        { count: suitesRemainingCount, guest: pendingAssignmentBooking.guest_name },
+                      )
+                    : translate('assign.all_suites_selected', { guest: pendingAssignmentBooking.guest_name })}
                 </p>
                 {live?.assignError ? (
                   <p className="text-sm text-center text-red-600">{live.assignError}</p>
@@ -1653,7 +1720,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="flex-1 py-3 rounded-xl text-sm font-medium min-h-[44px]"
                     style={btnGhost}
                   >
-                    Cancel
+                    {translate('common.cancel')}
                   </button>
                   <button
                     type="button"
@@ -1662,7 +1729,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                     style={btnAccent}
                   >
-                    {live?.isAssigning ? 'Assigning…' : 'Confirm Assignment'}
+                    {live?.isAssigning ? translate('booking.assigning') : translate('assign.confirm_assignment')}
                   </button>
                 </div>
               </div>
@@ -1674,7 +1741,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ WELCOME ═════════════════════════════════════════════════════════════ */}
       {screen === 'welcome' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left — greeting */}
@@ -1693,7 +1760,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 }}
                 className="absolute top-4 right-4 p-2 rounded-xl transition-colors opacity-30 hover:opacity-100 min-h-[44px] min-w-[44px]"
                 style={{ background: C.bg2 }}
-                aria-label="Re-assign iPad"
+                aria-label={translate('welcome.reassign_aria')}
               >
                 <RotateCcw className="w-4 h-4" style={{ color: C.text }} />
               </button>
@@ -1736,8 +1803,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               </button>
             </div>
 
-            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} />}
-            {role === 'staff' && !live && <InfoPanel />}
+            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} t={translate} />}
+            {role === 'staff' && !live && <InfoPanel t={translate} />}
           </div>
         </div>
       )}
@@ -1745,7 +1812,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ MENU ════════════════════════════════════════════════════════════════ */}
       {screen === 'menu' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
 
           <div className="flex-1 flex overflow-hidden">
             {/* Left — menu */}
@@ -1807,7 +1874,9 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
               {/* List */}
               <div className="flex-1 overflow-y-auto px-5 py-4" style={{ background: C.bg2 }}>
-                {filteredMenu.length === 0 ? (
+                {live?.isLoadingMenu ? (
+                  <MenuCardSkeletonGrid />
+                ) : filteredMenu.length === 0 ? (
                   <p className="py-10 text-center text-sm" style={{ color: C.textMid }}>
                     {live && menuSource.length === 0
                       ? translate('menu.noActiveMenu')
@@ -1950,14 +2019,14 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg"
                     style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
                     <ShoppingCart className="w-5 h-5" />
-                    View Cart ({cartCount} item{cartCount !== 1 ? 's' : ''})
+                    {translate('cart.view_cart', { count: cartCount })}
                   </button>
                 </div>
               )}
             </div>
 
-            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} />}
-            {role === 'staff' && !live && <InfoPanel />}
+            {role === 'staff' && live?.booking && <InfoPanel booking={live.booking} t={translate} />}
+            {role === 'staff' && !live && <InfoPanel t={translate} />}
           </div>
         </div>
       )}
@@ -1965,7 +2034,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CART ════════════════════════════════════════════════════════════════ */}
       {screen === 'cart' && (
         <div className="h-full flex flex-col">
-          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} />
+          <KioskHeader subtitle={assignedSuite?.name} languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border }}>
             <button onClick={() => goTo('menu')}
@@ -1973,7 +2042,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div>
-              <p className="font-semibold" style={{ color: C.text }}>Review Order</p>
+              <p className="font-semibold" style={{ color: C.text }}>{translate('checkout.title')}</p>
               <p className="text-xs" style={{ color: C.textMid }}>{assignedSuite?.name}</p>
             </div>
           </div>
@@ -2002,7 +2071,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         ? { background: C.accentDim, color: C.accent, border: `1px solid ${C.accent}55` }
                         : { background: C.bg2, color: C.textMid, border: `1px solid ${C.border}` }}>
                       <MessageSquare className="w-3 h-3" />
-                      Custom
+                      {translate('checkout.custom_button')}
                     </button>
                     <div className="flex items-center gap-2">
                       <button onClick={() => removeItem(item.id)}
@@ -2043,10 +2112,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
 
             <div className="mb-6">
               <label className="text-xs uppercase tracking-wider block mb-2" style={{ color: C.textMid }}>
-                Special Requests (optional)
+                {translate('checkout.special_requests_label')}
               </label>
               <textarea value={specialNote} onChange={e => setSpecialNote(e.target.value)}
-                placeholder="Allergies, preferences, special instructions…"
+                placeholder={translate('checkout.special_requests_placeholder')}
                 rows={3}
                 className="w-full px-4 py-3 text-sm resize-none focus:outline-none rounded-xl"
                 style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
@@ -2063,7 +2132,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               disabled={live?.isSubmitting}
               className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] shadow-lg disabled:opacity-60"
               style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
-              {live?.isSubmitting ? 'Submitting…' : 'Place Order'}
+              {live?.isSubmitting ? translate('checkout.submitting') : translate('checkout.place_order')}
             </button>
           </div>
         </div>
@@ -2072,7 +2141,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ CONFIRM ═════════════════════════════════════════════════════════════ */}
       {screen === 'confirm' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center" style={{ background: C.bg2 }}>
             <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -2082,18 +2151,18 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
             </motion.div>
 
             <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
-              <h1 className="text-3xl mb-2" style={{ fontWeight: 300, color: C.text }}>Order Placed!</h1>
-              <p className="mb-6" style={{ color: C.textMid }}>Your order has been sent to our team</p>
+              <h1 className="text-3xl mb-2" style={{ fontWeight: 300, color: C.text }}>{translate('success.title')}</h1>
+              <p className="mb-6" style={{ color: C.textMid }}>{translate('success.subtitle')}</p>
 
               <div className="inline-flex flex-col items-center rounded-2xl px-8 py-5 mb-6"
                 style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-                <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>Order Number</p>
+                <p className="text-xs uppercase tracking-wider mb-1" style={{ color: C.textMid }}>{translate('success.order_number')}</p>
                 <p className="text-2xl font-mono font-bold" style={{ color: C.accent }}>{orderNo}</p>
               </div>
 
               <div className="flex items-center justify-center gap-2 text-sm mb-8" style={{ color: C.textMid }}>
                 <Clock className="w-4 h-4" />
-                Estimated delivery: 10–15 minutes
+                {translate('success.estimated_time')}
               </div>
 
               <div className="rounded-2xl p-4 mb-8 text-left max-w-sm mx-auto"
@@ -2111,13 +2180,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   className="flex items-center gap-2 px-8 py-4 rounded-2xl font-semibold transition-all active:scale-[0.97] shadow-lg"
                   style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
                   <Utensils className="w-4 h-4" />
-                  Order More
+                  {translate('success.order_more')}
                 </button>
                 <button onClick={() => goTo('history')}
                   className="flex items-center gap-2 px-8 py-4 rounded-2xl font-medium transition-all active:scale-[0.97]"
                   style={btnGhost}>
                   <History className="w-4 h-4" />
-                  View History
+                  {translate('success.view_history')}
                 </button>
               </div>
             </motion.div>
@@ -2128,16 +2197,16 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
       {/* ══ HISTORY ═════════════════════════════════════════════════════════════ */}
       {screen === 'history' && (
         <div className="h-full flex flex-col">
-          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} />
+          <KioskHeader languageSwitcher={live?.headerLanguageSwitcher} logoAlt={translate('brand.lounge_name')} />
 
           <div className="flex items-center gap-3 px-6 py-4 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
             <button onClick={() => goTo('menu')} className="p-2 rounded-xl transition-colors" style={btnGhost}>
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div>
-              <p className="font-semibold" style={{ color: C.text }}>Order History</p>
+              <p className="font-semibold" style={{ color: C.text }}>{translate('history.title')}</p>
               <p className="text-xs" style={{ color: C.textMid }}>
-                {assignedSuite?.name} · {orders.length} order{orders.length !== 1 ? 's' : ''} this session
+                {assignedSuite?.name} · {translate('history.session_orders', { count: orders.length })}
               </p>
             </div>
           </div>
@@ -2146,18 +2215,25 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
             {orders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-4" style={{ color: C.textMid }}>
                 <History className="w-12 h-12 opacity-30" />
-                <p className="text-sm">No orders placed yet</p>
+                <p className="text-sm">{translate('history.empty_state')}</p>
               </div>
             ) : (
               <>
                 <div className="rounded-2xl px-5 py-4 flex items-center justify-between"
                   style={{ background: C.accentDim, border: `1px solid ${C.accent}44` }}>
                   <div>
-                    <p className="text-xs uppercase tracking-wider mb-0.5" style={{ color: C.accent }}>This Session</p>
-                    <p className="text-2xl font-semibold" style={{ color: C.text }}>{orders.length} order{orders.length !== 1 ? 's' : ''}</p>
+                    <p className="text-xs uppercase tracking-wider mb-0.5" style={{ color: C.accent }}>{translate('history.this_session')}</p>
+                    <p className="text-2xl font-semibold" style={{ color: C.text }}>
+                      {translate(
+                        orders.length === 1 ? 'history.order_summary' : 'history.order_summary_plural',
+                        { count: orders.length },
+                      )}
+                    </p>
                   </div>
                   <p className="text-xs" style={{ color: C.textMid }}>
-                    {orders.reduce((s, o) => s + o.items.reduce((si, i) => si + i.qty, 0), 0)} items total
+                    {translate('history.items_total', {
+                      count: orders.reduce((s, o) => s + o.items.reduce((si, i) => si + i.qty, 0), 0),
+                    })}
                   </p>
                 </div>
 
@@ -2179,11 +2255,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       </div>
                       <div className="flex items-center gap-1.5 text-xs" style={kitchenStatusStyle(order.items[0]?.kitchenStatus)}>
                         <CheckCircle className="w-3 h-3" />
-                        {order.items.every(i => (i.kitchenStatus ?? '').toLowerCase() === 'served')
-                          ? 'Served'
-                          : order.items.some(i => (i.kitchenStatus ?? '').toLowerCase() === 'preparing')
-                            ? 'Preparing'
-                            : 'Pending'}
+                        {aggregateOrderKitchenStatus(order.items, translate)}
                       </div>
                     </div>
                     <div className="px-5 py-3 space-y-2">
@@ -2194,7 +2266,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                             <div className="flex items-center gap-2 shrink-0">
                               {item.kitchenStatus && (
                                 <span className="text-[10px] font-medium" style={kitchenStatusStyle(item.kitchenStatus)}>
-                                  {item.kitchenStatus}
+                                  {translateKitchenStatus(item.kitchenStatus, translate)}
                                 </span>
                               )}
                               <span style={{ color: C.textLight }}>× {item.qty}</span>
@@ -2210,7 +2282,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       ))}
                       {order.note && (
                         <p className="text-xs pt-1 border-t mt-2" style={{ color: C.textLight, borderColor: C.border }}>
-                          Note: {order.note}
+                          {translate('history.note_label')} {order.note}
                         </p>
                       )}
                     </div>
@@ -2225,7 +2297,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               className="w-full py-4 rounded-2xl font-semibold text-base transition-all active:scale-[0.98] shadow-lg"
               style={{ ...btnAccent, boxShadow: `0 4px 16px ${C.accent}44` }}>
               <span className="flex items-center justify-center gap-2">
-                <Utensils className="w-5 h-5" /> Back to Menu
+                <Utensils className="w-5 h-5" /> {translate('history.back_to_menu')}
               </span>
             </button>
           </div>
