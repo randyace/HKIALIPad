@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, User, Plane, Users, CreditCard, AlertTriangle, Leaf, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, Plane, Users, AlertTriangle, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
 import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
@@ -9,6 +9,8 @@ import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 import { PreOrderDispatchDialog } from '@/components/PreOrderDispatchDialog';
 import { ConflictAlertList } from '@/components/ConflictAlertList';
 import { MenuCardSkeletonGrid } from '@/components/MenuCardSkeleton';
+import { KioskInfoPanel } from './KioskInfoPanel';
+import { MenuItemCard } from './MenuItemCard';
 import {
   bookingRequiresLoungeAssignment,
   evaluateLoungePreorderAssignment,
@@ -554,51 +556,49 @@ function KioskHeader({
   logoAlt?: string;
   onHiddenStaffTrigger?: () => void;
 }) {
-  const clickCountRef = useRef(0);
-  const clickTimerRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
 
-  const handleHiddenZoneClick = () => {
+  const clearLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleLogoPointerDown = () => {
     if (!onHiddenStaffTrigger) {
       return;
     }
 
-    clickCountRef.current += 1;
-
-    if (clickTimerRef.current !== null) {
-      window.clearTimeout(clickTimerRef.current);
-    }
-
-    if (clickCountRef.current >= 3) {
-      clickCountRef.current = 0;
-      clickTimerRef.current = null;
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
       onHiddenStaffTrigger();
-      return;
-    }
+    }, 3000);
+  };
 
-    clickTimerRef.current = window.setTimeout(() => {
-      clickCountRef.current = 0;
-      clickTimerRef.current = null;
-    }, 1500);
+  const handleLogoPointerEnd = () => {
+    clearLongPress();
   };
 
   return (
     <div className="relative flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
-      {onHiddenStaffTrigger && (
-        <button
-          type="button"
-          data-testid="staff-pin-trigger"
-          aria-hidden="true"
-          tabIndex={-1}
-          onClick={handleHiddenZoneClick}
-          className={`absolute top-0 z-20 h-16 w-20 cursor-default opacity-0 ${languageSwitcher ? 'right-24' : 'right-0'}`}
-        />
-      )}
       {languageSwitcher && (
         <div className="absolute top-4 right-4 z-10">
           {languageSwitcher}
         </div>
       )}
-      <img src={logoImg} alt={logoAlt} className="h-10 mb-2" />
+      <img
+        src={logoImg}
+        alt={logoAlt}
+        data-testid={onHiddenStaffTrigger ? 'staff-pin-trigger' : undefined}
+        className="h-10 mb-2 select-none touch-none"
+        draggable={false}
+        onPointerDown={handleLogoPointerDown}
+        onPointerUp={handleLogoPointerEnd}
+        onPointerLeave={handleLogoPointerEnd}
+        onPointerCancel={handleLogoPointerEnd}
+      />
       
       {subtitle && (
         <p className="text-xs mt-0.5 tracking-widest uppercase" style={{ color: C.accent }}>{subtitle}</p>
@@ -616,100 +616,26 @@ function InfoPanel({
   t: (key: string, values?: Record<string, string | number>) => string;
 }) {
   return (
-    <div className="w-72 flex flex-col overflow-y-auto shrink-0 border-l" style={{ borderColor: C.border, background: C.bg2 }}>
-
-      {/* Member */}
-      <div className="p-4 border-b" style={{ borderColor: C.border }}>
-        <div className="flex items-center gap-1.5 mb-3">
-          <User className="w-3.5 h-3.5" style={{ color: C.textMid }} />
-          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>{t('info.member')}</span>
-        </div>
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: C.text }}>{booking.memberName}</p>
-            <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{booking.accountNo}</p>
-            {booking.companyName && (
-              <p className="text-xs mt-0.5" style={{ color: C.textMid }}>{booking.companyName}</p>
-            )}
-          </div>
-          <span className="text-xs px-2 py-1 rounded-full border font-medium shrink-0"
-            style={{ background: C.accentDim, color: C.accent, borderColor: C.accent + '55' }}>
-            {booking.membershipTier}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs" style={{ color: C.textLight }}>
-          <CreditCard className="w-3 h-3" />
-          {booking.paymentMode} · {booking.accountType}
-        </div>
-      </div>
-
-      {/* Booking */}
-      <div className="p-4 border-b" style={{ borderColor: C.border }}>
-        <div className="flex items-center gap-1.5 mb-3">
-          <MapPin className="w-3.5 h-3.5" style={{ color: C.textMid }} />
-          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>{t('info.booking')}</span>
-        </div>
-        <p className="text-xs font-mono font-semibold mb-3" style={{ color: C.accent }}>{booking.bookingNo}</p>
-        <div className="space-y-2">
-          {[
-            { icon: Clock,  label: t('info.check_in'),    val: booking.checkInTime },
-            { icon: Users,  label: t('info.guests'),       val: t('occupied_dialog.pax', { count: booking.numberOfGuests }) },
-            { icon: Plane,  label: t('info.flight'),        val: booking.flightNo },
-            { icon: null,   label: t('info.departure'),    val: booking.flightTime },
-            { icon: null,   label: t('info.destination'),  val: booking.flightDestination },
-          ].map(({ icon: Icon, label, val }) => (
-            <div key={label} className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5" style={{ color: C.textMid }}>
-                {Icon && <Icon className="w-3 h-3" />}{label}
-              </span>
-              <span style={{ color: C.text }}>{val}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Allergies */}
-      <div className="p-4">
-        <div className="flex items-center gap-1.5 mb-3">
-          <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-          <span className="text-xs uppercase tracking-wider text-red-500">{t('info.allergies_dietary')}</span>
-        </div>
-        <div className="space-y-3">
-          {booking.guestProfiles.map((guest, i) =>
-            (guest.allergies.length > 0 || guest.dietary.length > 0) ? (
-              <div key={i} className="rounded-xl p-3" style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold" style={{ color: C.text }}>{guest.name}</p>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: C.bg2, color: C.textMid }}>{guest.relation}</span>
-                </div>
-                {guest.allergies.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    {guest.allergies.map((a, j) => (
-                      <span key={j} className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-                        a.severity === 'Severe'   ? 'bg-red-50 text-red-600 border-red-200' :
-                        a.severity === 'Moderate' ? 'bg-orange-50 text-orange-600 border-orange-200' :
-                                                    'bg-yellow-50 text-yellow-700 border-yellow-200'
-                      }`}>
-                        {a.severity === 'Severe' ? '⚠ ' : ''}{a.allergen}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {guest.dietary.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {guest.dietary.map((d, j) => (
-                      <span key={j} className="text-[10px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
-                        <Leaf className="w-2.5 h-2.5" />{d}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null
-          )}
-        </div>
-      </div>
-    </div>
+    <KioskInfoPanel
+      booking={{
+        bookingNo: booking.bookingNo,
+        memberName: booking.memberName,
+        accountNo: booking.accountNo,
+        membershipTier: booking.membershipTier,
+        checkInTime: booking.checkInTime,
+        flightNo: booking.flightNo,
+        flightTime: booking.flightTime,
+        flightDestination: booking.flightDestination,
+        numberOfGuests: booking.numberOfGuests,
+        guestProfiles: booking.guestProfiles.map((guest) => ({
+          name: guest.name,
+          relation: guest.relation,
+          allergies: guest.allergies,
+          dietary: guest.dietary,
+        })),
+      }}
+      t={t}
+    />
   );
 }
 
@@ -1122,8 +1048,6 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     (live?.guestAllergies ?? bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen)))
       .map((allergen) => allergen.toLowerCase()),
   );
-  const hasAllergenWarning = (item: MenuItem) =>
-    item.allergens?.some(a => guestAllergens.has(a.toLowerCase())) ?? false;
 
   const handleStaffViewToggle = () => {
     setRole(role === 'staff' ? 'customer' : 'staff');
@@ -1509,8 +1433,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   {live.occupiedSessionError} {translate('occupied_dialog.load_anyway_suffix')}
                 </p>
               ) : (
-                <p className="text-sm text-center py-8" style={{ color: C.textMid }}>
-                  {translate('occupied_dialog.session_unavailable')}
+                <p className="text-sm text-center py-4" style={{ color: C.textMid }}>
+                  {translate('occupied_dialog.load_anyway_suffix')}
                 </p>
               )}
 
@@ -2000,127 +1924,19 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 ) : (
                 <div key={category} className="grid grid-cols-3 gap-3">
                   {filteredMenu.map((item) => {
-                    const qty = getQty(item.id);
-                    const warn = hasAllergenWarning(item);
                     const rowKey = `${item.sectionId ?? 'all'}-${item.id}`;
-                    const allergenText = item.allergens?.length
-                      ? `⚠️ ${translate('menu.contains')}: ${item.allergens.join(', ')}`
-                      : null;
                     return (
-                      <div
+                      <MenuItemCard
                         key={rowKey}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleMenuCardClick(item)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            handleMenuCardClick(item);
-                          }
-                        }}
-                        className={`rounded-2xl flex flex-row transition-shadow overflow-hidden relative cursor-pointer hover:shadow-md ${
-                          warn ? 'border-2 border-red-500 bg-red-50' : ''
-                        }`}
-                        style={warn ? undefined : {
-                          background: C.bg,
-                          border: `1.5px solid ${qty > 0 ? C.accent : C.border}`,
-                          boxShadow: qty > 0 ? `0 0 0 3px ${C.accent}22` : undefined,
-                        }}
-                      >
-                        <div className="shrink-0 overflow-hidden relative pointer-events-none">
-                          <ProductThumbnail imageUrl={item.image} alt={item.name} variant="menu" />
-                          {warn && (
-                            <div className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center shadow bg-red-100">
-                              <AlertTriangle className="w-3 h-3 text-red-500" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-between pointer-events-none">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <p className="font-semibold text-sm leading-tight" style={{ color: C.text }}>{item.name}</p>
-                              {hasMenuOptions(item) && (
-                                <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">
-                                  {translate('menu.options')}
-                                </span>
-                              )}
-                              {(item.dietaryTags ?? []).map((tag) => (
-                                <span
-                                  key={`${item.id}-${tag}`}
-                                  className="px-2 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 rounded-full uppercase tracking-wider"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                            <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>{item.posCategoryName ?? item.category}</p>
-                            {allergenText && (
-                              <p className={`text-[10px] leading-tight mt-0.5 line-clamp-2 ${warn ? 'text-red-600' : ''}`}
-                                style={warn ? undefined : { color: C.textMid }}>
-                                {allergenText}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div
-                          className="relative z-10 flex items-center pr-3 shrink-0 self-center"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {qty === 0 ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                event.preventDefault();
-                                handleMenuCardClick(item);
-                              }}
-                              className={`w-8 h-8 rounded-xl flex items-center justify-center active:scale-95 min-h-[44px] min-w-[44px] ${
-                                warn ? 'bg-red-600 text-white' : ''
-                              }`}
-                              style={warn ? undefined : btnAccent}
-                              aria-label={warn ? `${translate('menu.addWithCaution')} ${item.name}` : `Add ${item.name}`}
-                            >
-                              {warn ? (
-                                <span className="text-[9px] font-bold leading-none px-1">!</span>
-                              ) : (
-                                <Plus className="w-4 h-4" />
-                              )}
-                            </button>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  removeMenuItem(item.id);
-                                }}
-                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
-                                style={btnGhost}
-                                aria-label={`Remove ${item.name}`}
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="text-sm font-bold w-5 text-center" style={{ color: C.text }}>{qty}</span>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                  handleMenuCardClick(item);
-                                }}
-                                className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-all min-h-[44px] min-w-[44px]"
-                                style={warn ? { background: '#dc2626', color: '#fff' } : btnAccent}
-                                aria-label={`Add another ${item.name}`}
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                        item={item}
+                        qty={getQty(item.id)}
+                        activeAllergens={guestAllergens}
+                        isStaffMode={false}
+                        onAdd={() => handleMenuCardClick(item)}
+                        onRemove={() => removeMenuItem(item.id)}
+                        onCardClick={() => handleMenuCardClick(item)}
+                        t={translate}
+                      />
                     );
                   })}
                 </div>
