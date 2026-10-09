@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, Plane, Users, AlertTriangle, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import logoImg from '../../imports/logo.png';
@@ -341,6 +341,12 @@ export interface GuestKioskLiveConfig {
   onUnassignedBookingsDateChange?: (date: string) => void;
   isStaffAuthenticated?: boolean;
   onStaffLogin?: (email: string, password: string) => void | Promise<void>;
+  staffRequiresOtp?: boolean;
+  staffOtpMaskedEmail?: string | null;
+  staffOtpValue?: string;
+  onStaffOtpChange?: (otp: string) => void;
+  onStaffVerifyOtp?: () => void | Promise<void>;
+  onStaffOtpBack?: () => void;
   isStaffLoggingIn?: boolean;
   staffAuthError?: string | null;
   microsoftLoginEnabled?: boolean;
@@ -1581,39 +1587,72 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
+                      if (live.staffRequiresOtp) {
+                        void live.onStaffVerifyOtp?.();
+                        return;
+                      }
                       void live.onStaffLogin?.(staffEmail.trim(), staffPassword);
                     }}
                     className="space-y-3"
                     autoComplete="off"
                   >
-                    <div>
-                      <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.email_label')}</label>
-                      <input
-                        id="staff-login-email"
-                        type="email"
-                        autoComplete="off"
-                        value={staffEmail}
-                        onChange={(e) => setStaffEmail(e.target.value)}
-                        placeholder={translate('login.email_placeholder')}
-                        className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
-                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="staff-login-password" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.password_label')}</label>
-                      <input
-                        id="staff-login-password"
-                        type="password"
-                        autoComplete="new-password"
-                        value={staffPassword}
-                        onChange={(e) => setStaffPassword(e.target.value)}
-                        placeholder={translate('login.password_placeholder')}
-                        className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
-                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
-                        required
-                      />
-                    </div>
+                    {live.staffRequiresOtp ? (
+                      <>
+                        <div>
+                          <p className="font-semibold mb-1" style={{ color: C.text }}>{translate('login.otp_title')}</p>
+                          <p className="text-xs mb-3" style={{ color: C.textMid }}>
+                            {translate('login.otp_subtitle', { email: live.staffOtpMaskedEmail || '' })}
+                          </p>
+                          <label htmlFor="staff-login-otp" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.otp_label')}</label>
+                          <input
+                            id="staff-login-otp"
+                            type="text"
+                            name="one-time-code"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            autoComplete="one-time-code"
+                            maxLength={6}
+                            value={live.staffOtpValue ?? ''}
+                            onChange={(e) => live.onStaffOtpChange?.(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder={translate('login.otp_placeholder')}
+                            className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px] text-center tracking-[0.3em]"
+                            style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text, WebkitTextSecurity: 'disc' } as CSSProperties}
+                            required
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.email_label')}</label>
+                          <input
+                            id="staff-login-email"
+                            type="email"
+                            autoComplete="off"
+                            value={staffEmail}
+                            onChange={(e) => setStaffEmail(e.target.value)}
+                            placeholder={translate('login.email_placeholder')}
+                            className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
+                            style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="staff-login-password" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.password_label')}</label>
+                          <input
+                            id="staff-login-password"
+                            type="password"
+                            autoComplete="new-password"
+                            value={staffPassword}
+                            onChange={(e) => setStaffPassword(e.target.value)}
+                            placeholder={translate('login.password_placeholder')}
+                            className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none min-h-[44px]"
+                            style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
+                            required
+                          />
+                        </div>
+                      </>
+                    )}
                     {live.staffAuthError && (
                       <p className="text-sm text-red-600 text-center">{live.staffAuthError}</p>
                     )}
@@ -1624,13 +1663,30 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     )}
                     <button
                       type="submit"
-                      disabled={live.isStaffLoggingIn || live.isMicrosoftLoggingIn || live.microsoftHandshakeBusy}
+                      disabled={
+                        live.isStaffLoggingIn
+                        || live.isMicrosoftLoggingIn
+                        || live.microsoftHandshakeBusy
+                        || (live.staffRequiresOtp ? (live.staffOtpValue ?? '').length < 6 : false)
+                      }
                       className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
                       style={btnAccent}
                     >
-                      {live.isStaffLoggingIn ? translate('login.signing_in') : translate('login.submit_button')}
+                      {live.staffRequiresOtp
+                        ? (live.isStaffLoggingIn ? translate('login.otp_verifying') : translate('login.otp_submit'))
+                        : (live.isStaffLoggingIn ? translate('login.signing_in') : translate('login.submit_button'))}
                     </button>
-                    {live.microsoftLoginEnabled && (
+                    {live.staffRequiresOtp ? (
+                      <button
+                        type="button"
+                        disabled={live.isStaffLoggingIn}
+                        onClick={() => live.onStaffOtpBack?.()}
+                        className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
+                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }}
+                      >
+                        {translate('login.otp_back')}
+                      </button>
+                    ) : live.microsoftLoginEnabled && (
                       <>
                         <div className="flex items-center gap-3 py-1">
                           <div className="flex-1 h-px" style={{ background: C.border }} />
