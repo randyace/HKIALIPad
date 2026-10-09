@@ -1584,13 +1584,14 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       void live.onStaffLogin?.(staffEmail.trim(), staffPassword);
                     }}
                     className="space-y-3"
+                    autoComplete="off"
                   >
                     <div>
                       <label htmlFor="staff-login-email" className="text-xs uppercase tracking-wider block mb-1.5" style={{ color: C.textMid }}>{translate('login.email_label')}</label>
                       <input
                         id="staff-login-email"
                         type="email"
-                        autoComplete="username"
+                        autoComplete="off"
                         value={staffEmail}
                         onChange={(e) => setStaffEmail(e.target.value)}
                         placeholder={translate('login.email_placeholder')}
@@ -1604,7 +1605,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       <input
                         id="staff-login-password"
                         type="password"
-                        autoComplete="current-password"
+                        autoComplete="new-password"
                         value={staffPassword}
                         onChange={(e) => setStaffPassword(e.target.value)}
                         placeholder={translate('login.password_placeholder')}
