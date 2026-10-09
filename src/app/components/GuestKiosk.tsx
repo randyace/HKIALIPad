@@ -343,6 +343,10 @@ export interface GuestKioskLiveConfig {
   onStaffLogin?: (email: string, password: string) => void | Promise<void>;
   isStaffLoggingIn?: boolean;
   staffAuthError?: string | null;
+  microsoftLoginEnabled?: boolean;
+  onStaffMicrosoftLogin?: () => void | Promise<void>;
+  isMicrosoftLoggingIn?: boolean;
+  microsoftHandshakeBusy?: boolean;
   onStaffLogout?: () => void;
   assignedSuite: { name: string; kind: string } | null;
   guestName: string;
@@ -1612,14 +1616,47 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     {live.staffAuthError && (
                       <p className="text-sm text-red-600 text-center">{live.staffAuthError}</p>
                     )}
+                    {live.microsoftHandshakeBusy && (
+                      <p className="text-sm text-center" style={{ color: C.textMid }}>
+                        {translate('login.microsoft_completing')}
+                      </p>
+                    )}
                     <button
                       type="submit"
-                      disabled={live.isStaffLoggingIn}
+                      disabled={live.isStaffLoggingIn || live.isMicrosoftLoggingIn || live.microsoftHandshakeBusy}
                       className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
                       style={btnAccent}
                     >
                       {live.isStaffLoggingIn ? translate('login.signing_in') : translate('login.submit_button')}
                     </button>
+                    {live.microsoftLoginEnabled && (
+                      <>
+                        <div className="flex items-center gap-3 py-1">
+                          <div className="flex-1 h-px" style={{ background: C.border }} />
+                          <span className="text-xs uppercase tracking-wider" style={{ color: C.textMid }}>
+                            {translate('login.or_divider')}
+                          </span>
+                          <div className="flex-1 h-px" style={{ background: C.border }} />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={live.isStaffLoggingIn || live.isMicrosoftLoggingIn || live.microsoftHandshakeBusy}
+                          onClick={() => {
+                            void live.onStaffMicrosoftLogin?.();
+                          }}
+                          className="w-full py-4 rounded-xl font-semibold text-sm min-h-[44px] disabled:opacity-50"
+                          style={{
+                            background: C.bg,
+                            border: `1px solid ${C.border}`,
+                            color: C.text,
+                          }}
+                        >
+                          {live.isMicrosoftLoggingIn
+                            ? translate('login.microsoft_redirecting')
+                            : translate('login.microsoft_button')}
+                        </button>
+                      </>
+                    )}
                   </form>
                 </div>
                 </div>
