@@ -1048,8 +1048,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const removeMenuItem = (baseId: string) => {
     const matching = cart.filter((line) => line.id === baseId || line.id.startsWith(`${baseId}-`));
     if (!matching.length) {
-      return;
-    }
+            return;
+          }
     removeItem(matching[matching.length - 1].id);
   };
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
@@ -1255,7 +1255,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     style={{ color: C.text }}
                     aria-label={translate('booking.search_aria')}
                   />
-                </div>
+              </div>
                 <div className="w-48 shrink-0">
                   <StringDatePicker
                     value={selectedDate}
@@ -1372,7 +1372,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <div className="flex items-center justify-center gap-2 py-10" style={{ color: C.textMid }}>
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">{translate('occupied_dialog.loading_details')}</span>
-                </div>
+              </div>
               ) : live?.occupiedSession ? (
                 <div className="space-y-4">
                   <div
@@ -1433,8 +1433,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                               </p>
                             </div>
                           </div>
-                        ))}
-                      </div>
+                ))}
+              </div>
                     )}
                   </div>
                 </div>
@@ -1576,13 +1576,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <div className="mx-auto w-full max-w-lg">
                 <div className="rounded-2xl p-6" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center gap-3 mb-5">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.accentDim }}>
                       <Lock className="w-5 h-5" style={{ color: C.accent }} />
-                    </div>
-                    <div>
+                </div>
+                <div>
                       <p className="font-semibold" style={{ color: C.text }}>{translate('login.title')}</p>
                       <p className="text-xs" style={{ color: C.textMid }}>{translate('login.subtitle')}</p>
-                    </div>
+                </div>
                   </div>
                   <form
                     onSubmit={(e) => {
@@ -1863,10 +1863,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     style={btnAccent}
                   >
                     {live?.isAssigning ? translate('booking.assigning') : translate('assign.confirm_assignment')}
-                  </button>
-                </div>
+                </button>
               </div>
             </div>
+          </div>
           ) : null}
         </div>
       )}
