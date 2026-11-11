@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, Plane, Users, AlertTriangle, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import logoImg from '../../imports/logo.png';
+import { resolveBrandProfile } from '@/lib/branding';
 import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
 import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
@@ -566,6 +566,7 @@ function KioskHeader({
   logoAlt?: string;
   onHiddenStaffTrigger?: () => void;
 }) {
+  const brand = resolveBrandProfile();
   const longPressTimerRef = useRef<number | null>(null);
 
   const clearLongPress = () => {
@@ -592,17 +593,21 @@ function KioskHeader({
   };
 
   return (
-    <div className="relative flex flex-col items-center py-5 border-b shrink-0" style={{ borderColor: C.border, background: C.bg }}>
+    <div
+      className="relative flex flex-col items-center py-5 border-b shrink-0"
+      style={{ borderColor: C.border, background: C.bg }}
+      data-brand-identity={brand.identity}
+    >
       {languageSwitcher && (
         <div className="absolute top-4 right-4 z-10">
           {languageSwitcher}
         </div>
       )}
       <img
-        src={logoImg}
+        src={brand.logoSrc}
         alt={logoAlt}
-        data-testid={onHiddenStaffTrigger ? 'staff-pin-trigger' : undefined}
-        className="h-10 mb-2 select-none touch-none"
+        data-testid={onHiddenStaffTrigger ? 'staff-pin-trigger' : 'brand-logo'}
+        className="h-10 mb-2 select-none touch-none object-contain"
         draggable={false}
         onPointerDown={handleLogoPointerDown}
         onPointerUp={handleLogoPointerEnd}
@@ -1559,9 +1564,21 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               {live.welcomeLanguageSwitcher}
             </div>
           )}
-          {/* Header with logo */}
-          <div className="flex shrink-0 flex-col items-center border-b py-6" style={{ borderColor: C.border }}>
-            <img src={logoImg} alt={translate('brand.lounge_name')} className="h-12 mb-3" />
+          {/* Header with logo — Commercial vs GVIPL from runtime APP_NAME */}
+          {(() => {
+            const brand = resolveBrandProfile()
+            return (
+          <div
+            className="flex shrink-0 flex-col items-center border-b py-6"
+            style={{ borderColor: C.border }}
+            data-brand-identity={brand.identity}
+          >
+            <img
+              src={brand.logoSrc}
+              alt={translate('brand.lounge_name')}
+              className="h-12 mb-3 object-contain"
+              data-testid="brand-logo"
+            />
             <p className="text-sm tracking-[0.15em] uppercase font-medium" style={{ color: C.text }}>
               {translate('brand.airport_name')}
             </p>
@@ -1569,6 +1586,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
               {translate('assign.brand_tagline')}
             </p>
           </div>
+            )
+          })()}
 
           <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-8">
             <div className="mx-auto w-full max-w-7xl">
