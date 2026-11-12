@@ -5,6 +5,7 @@ import { resolveBrandProfile } from '@/lib/branding';
 import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
 import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
+import { PortalEnvironmentSwitcher } from '@/components/PortalEnvironmentSwitcher';
 import { hasMenuOptions, ItemOptionsModal } from './ItemOptionsModal';
 import { PreOrderDispatchDialog } from '@/components/PreOrderDispatchDialog';
 import { ConflictAlertList } from '@/components/ConflictAlertList';
@@ -1735,6 +1736,7 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     )}
                   </form>
                 </div>
+                <PortalEnvironmentSwitcher />
                 </div>
               ) : (
               <>
