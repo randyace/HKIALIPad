@@ -2295,7 +2295,11 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                         <div>
                           <p className="font-mono text-sm font-semibold" style={{ color: C.accent }}>{order.orderNo}</p>
                           <p className="text-xs" style={{ color: C.textMid }}>
-                            {order.placedAt.toLocaleTimeString('en-HK', { hour: '2-digit', minute: '2-digit' })}
+                            {order.placedAt.toLocaleTimeString('en-HK', {
+                              timeZone: 'Asia/Hong_Kong',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
                           </p>
                         </div>
                       </div>

@@ -545,6 +545,7 @@ function OrderCard({ order, lang, onToggleItem, onMarkAll }: OrderCardProps) {
             {order.servedAt && (
               <span style={{ fontSize: '0.85em' }} className="text-green-600 ml-1">
                 · {order.servedAt.toLocaleTimeString('en-HK', {
+                  timeZone: 'Asia/Hong_Kong',
                   hour: '2-digit', minute: '2-digit', hour12: false,
                 })}
               </span>
@@ -749,6 +750,7 @@ export function KitchenDisplay({
           <span style={{ fontSize: '0.8em' }} className="text-blue-200 hidden sm:block">
             {t.refreshedAt}{' '}
             {lastRefreshed.toLocaleTimeString('en-HK', {
+              timeZone: 'Asia/Hong_Kong',
               hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
             })}
           </span>
