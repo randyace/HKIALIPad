@@ -1,7 +1,9 @@
 import { AlertTriangle, Minus, Plus } from 'lucide-react'
 import type { MenuItem } from '@figma/app/components/GuestKiosk'
 import { hasMenuOptions } from '@figma/app/components/ItemOptionsModal'
+import { useLanguage } from '@/i18n/LanguageContext'
 import { getMatchedAllergens, hasAllergenWarning } from '@/lib/allergyWarning'
+import { formatPaidMenuPrice } from '@/lib/menuPrice'
 
 const C = {
   bg: '#FFFFFF',
@@ -47,10 +49,12 @@ export function MenuItemCard({
   onCardClick,
   t,
 }: MenuItemCardProps) {
+  const { locale } = useLanguage()
   const hasWarning = hasAllergenWarning(item.allergens, activeAllergens)
   const showAllergyWarning = isStaffMode && hasWarning
-  const matchedAllergens = getMatchedAllergens(item.allergens, activeAllergens)
+  const matchedAllergens = getMatchedAllergens(item.allergens, activeAllergens, locale)
   const allergenList = item.allergens?.length ? item.allergens.join(', ') : null
+  const priceLabel = formatPaidMenuPrice(item.price)
   const handleCardClick = onCardClick ?? onAdd
 
   const cardClassName = `rounded-2xl flex flex-row text-left overflow-hidden relative cursor-pointer transition-all hover:shadow-md active:scale-[0.98] ${
@@ -115,6 +119,11 @@ export function MenuItemCard({
           <p className="text-[10px] font-medium uppercase tracking-wide mt-0.5" style={{ color: C.accent }}>
             {item.posCategoryName ?? item.category}
           </p>
+          {priceLabel ? (
+            <p className="text-sm font-bold mt-1 tabular-nums" style={{ color: C.text }}>
+              {priceLabel}
+            </p>
+          ) : null}
           {allergenList ? (
             <p
               className={`text-xs leading-tight mt-0.5 line-clamp-2 ${

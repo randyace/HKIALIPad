@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, type CSSProperties, type ReactNod
 import { ShoppingCart, Plus, Minus, X, ChevronLeft, CheckCircle, Clock, MapPin, Tablet, Lock, RotateCcw, Utensils, History, Plane, Users, AlertTriangle, MessageSquare, Bell, Search, Loader2, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { resolveBrandProfile } from '@/lib/branding';
+import { buildActiveAllergensSet } from '@/lib/allergyWarning';
 import { buildCartLineSignatureFromOptions } from '@/lib/cartLineSignature';
 import { resolveRequiredSuiteCount } from '@/lib/resolveRequiredSuiteCount';
 import { StringDatePicker } from '@/components/ui/CustomDatePicker';
@@ -207,6 +208,8 @@ export interface MenuItem {
   sectionTab?: string;
   description: string;
   image: string;
+  /** Unit price from POS catalog. Display only when > 0. */
+  price?: number;
   allergens?: string[];
   dietaryTags?: string[];
   optionGroups?: MenuOptionGroup[];
@@ -1060,10 +1063,13 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   };
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
 
-  const guestAllergens = new Set(
-    (live?.guestAllergies ?? bookingData.guestProfiles.flatMap(g => g.allergies.map(a => a.allergen)))
-      .map((allergen) => allergen.toLowerCase()),
-  );
+  const guestAllergens = buildActiveAllergensSet([
+    {
+      allergies:
+        live?.guestAllergies
+        ?? bookingData.guestProfiles.flatMap((g) => g.allergies.map((a) => a.allergen)),
+    },
+  ]);
 
   const handleStaffViewToggle = () => {
     setRole(role === 'staff' ? 'customer' : 'staff');
@@ -2107,6 +2113,14 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                       {item.selectedOptions?.length ? (
                         <p className="text-xs mt-0.5" style={{ color: C.textMid }}>
                           {item.selectedOptions.map((option) => option.name).join(', ')}
+                        </p>
+                      ) : null}
+                      {Number(item.price) > 0 ? (
+                        <p className="text-xs font-semibold mt-0.5 tabular-nums" style={{ color: C.text }}>
+                          {`HK$${Number(item.price).toLocaleString('en-HK', { maximumFractionDigits: 0 })}`}
+                          {item.qty > 1
+                            ? ` · HK$${(Number(item.price) * item.qty).toLocaleString('en-HK', { maximumFractionDigits: 0 })}`
+                            : ''}
                         </p>
                       ) : null}
                     </div>
