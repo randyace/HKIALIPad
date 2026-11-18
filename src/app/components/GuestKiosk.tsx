@@ -262,6 +262,7 @@ export interface GuestKioskLiveConfig {
     bookingId: number | null,
     dispatchItemIds?: number[],
     allSuiteIds?: number[],
+    walkIn?: { flight_number: string | null; pax: number } | null,
   ) => Promise<{ ok: true } | { ok: false; error: string }> | void;
   onStartMultiSuiteAssignment?: (suiteId: string, booking: NonNullable<GuestKioskLiveConfig['unassignedBookings']>[number]) => void;
   assignmentMode?: boolean;
@@ -684,6 +685,8 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
   const [showBookingDialog, setShowBookingDialog] = useState(false);
   const [showOccupiedDialog, setShowOccupiedDialog] = useState(false);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const [walkInFlightNo, setWalkInFlightNo] = useState('');
+  const [walkInPaxText, setWalkInPaxText] = useState('1');
   const [bookingSearchQuery, setBookingSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => formatDateYmd(new Date()));
   const [staffEmail, setStaffEmail] = useState('');
@@ -772,7 +775,22 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
     setShowBookingDialog(false);
     setBookingSearchQuery('');
     setPendingBookingId(null);
+    setWalkInFlightNo('');
+    setWalkInPaxText('1');
   };
+
+  const sanitizeWalkInPaxText = (raw: string): string =>
+    raw.replace(/\D+/g, '').replace(/^0+/, '');
+
+  const parsedWalkInPax =
+    walkInPaxText === '' ? null : (() => {
+      const parsed = parseInt(walkInPaxText, 10);
+      return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+    })();
+  const walkInPaxValid = parsedWalkInPax !== null;
+  const walkInSelected = pendingBookingId === null;
+  const assignDisabled =
+    Boolean(live?.isAssigning) || (walkInSelected && !walkInPaxValid);
 
   const closeOccupiedDialog = () => {
     setShowOccupiedDialog(false);
@@ -910,10 +928,23 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
         closeBookingDialog();
         return;
       }
+    } else if (!walkInPaxValid || parsedWalkInPax === null) {
+      return;
     }
 
+    const walkInMeta =
+      pendingBookingId === null
+        ? {
+            flight_number: (() => {
+              const trimmed = walkInFlightNo.trim().toUpperCase();
+              return trimmed.length > 0 ? trimmed : null;
+            })(),
+            pax: parsedWalkInPax as number,
+          }
+        : null;
+
     if (live?.onAssignBooking) {
-      await live.onAssignBooking(selectedSuiteId, pendingBookingId);
+      await live.onAssignBooking(selectedSuiteId, pendingBookingId, undefined, undefined, walkInMeta);
       closeBookingDialog();
       return;
     }
@@ -1253,6 +1284,59 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <span className="block text-xs mt-0.5" style={{ color: C.textMid }}>{translate('booking.walk_in_hint')}</span>
               </button>
 
+              {walkInSelected && (
+                <div
+                  className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border p-4"
+                  style={{ borderColor: C.border, background: C.bg2 }}
+                  data-testid="walk-in-fields"
+                >
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="walk-in-flight-no"
+                      className="text-sm font-medium"
+                      style={{ color: C.text }}
+                    >
+                      {translate('booking.flight_number')}
+                    </label>
+                    <input
+                      id="walk-in-flight-no"
+                      type="text"
+                      value={walkInFlightNo}
+                      onChange={(event) => setWalkInFlightNo(event.target.value.toUpperCase())}
+                      placeholder={translate('booking.flight_placeholder')}
+                      autoComplete="off"
+                      className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none min-h-[44px]"
+                      style={{ borderColor: C.border, background: C.bg, color: C.text }}
+                      data-testid="walk-in-flight-input"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="walk-in-pax"
+                      className="text-sm font-medium"
+                      style={{ color: C.text }}
+                    >
+                      {translate('booking.number_of_pax')}
+                    </label>
+                    <input
+                      id="walk-in-pax"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={walkInPaxText}
+                      onChange={(event) => setWalkInPaxText(sanitizeWalkInPaxText(event.target.value))}
+                      autoComplete="off"
+                      className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none min-h-[44px]"
+                      style={{ borderColor: C.border, background: C.bg, color: C.text }}
+                      data-testid="walk-in-pax-input"
+                    />
+                    {!walkInPaxValid ? (
+                      <p className="text-xs text-red-600">{translate('booking.pax_required')}</p>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
               <div className="sticky top-0 z-10 mb-3 flex gap-3 items-center w-full">
                 <div
                   className={`flex flex-1 min-w-0 items-center gap-2 ${BOOKING_FILTER_FIELD_CLASS}`}
@@ -1337,9 +1421,10 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <button
                   type="button"
                   onClick={() => void confirmPair()}
-                  disabled={live?.isAssigning}
+                  disabled={assignDisabled}
                   className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                   style={btnAccent}
+                  data-testid="walk-in-assign-confirm"
                 >
                   {live?.isAssigning ? translate('booking.assigning') : translate('booking.assign_start')}
                 </button>
