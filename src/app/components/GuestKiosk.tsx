@@ -313,6 +313,8 @@ export interface GuestKioskLiveConfig {
   } | null;
   isLoadingOccupiedSession?: boolean;
   occupiedSessionError?: string | null;
+  /** When true, Load is disabled (active-session 422 / stale occupancy). */
+  occupiedSessionUnavailable?: boolean;
   isLoadingSuite?: boolean;
   loadSuiteError?: string | null;
   isAssigning?: boolean;
@@ -1535,13 +1537,16 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                     )}
                   </div>
                 </div>
-              ) : live?.occupiedSessionError ? (
-                <p className="text-sm text-center py-8 text-amber-700">
-                  {live.occupiedSessionError} {translate('occupied_dialog.load_anyway_suffix')}
+              ) : live?.occupiedSessionUnavailable || live?.occupiedSessionError ? (
+                <p
+                  className="text-sm text-center py-8 text-amber-700"
+                  data-testid="occupied-session-unavailable"
+                >
+                  {translate('occupied_dialog.stale_session')}
                 </p>
               ) : (
                 <p className="text-sm text-center py-4" style={{ color: C.textMid }}>
-                  {translate('occupied_dialog.load_anyway_suffix')}
+                  {translate('occupied_dialog.session_unavailable')}
                 </p>
               )}
 
@@ -1561,9 +1566,15 @@ export function GuestKiosk({ live }: { live?: GuestKioskLiveConfig }) {
                 <button
                   type="button"
                   onClick={() => void live?.onLoadOccupiedSuite?.()}
-                  disabled={live?.isLoadingOccupiedSession || live?.isLoadingSuite}
+                  disabled={
+                    Boolean(live?.isLoadingOccupiedSession)
+                    || Boolean(live?.isLoadingSuite)
+                    || Boolean(live?.occupiedSessionUnavailable)
+                    || Boolean(live?.occupiedSessionError)
+                  }
                   className="flex-1 py-3 rounded-xl text-sm font-semibold min-h-[44px] disabled:opacity-50"
                   style={btnAccent}
+                  data-testid="occupied-load-suite"
                 >
                   {live?.isLoadingSuite ? translate('common.loading') : translate('occupied_dialog.load_suite')}
                 </button>
