@@ -1231,21 +1231,36 @@ export function CreateBooking({
                           </select>
                         </div>
                         <div className="col-span-3">
-                          <label className="text-sm text-gray-600 block" style={{ marginBottom: '10px' }}>Birthday</label>
-                          <div className="grid grid-cols-3 gap-2">
-                            <select value={p.birthdayDay} onChange={e => updatePassenger(idx, 'birthdayDay', e.target.value)}
+                          <label className="text-sm text-gray-600 block" style={{ marginBottom: '10px' }}>Birthday <span className="text-gray-400 font-normal">(optional)</span></label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              value={p.birthdayDay}
+                              onChange={e => {
+                                const birthdayDay = e.target.value;
+                                setPassengers(prev => prev.map((row, i) => i === idx ? {
+                                  ...row,
+                                  birthdayDay,
+                                  birthdayYear: birthdayDay && row.birthdayMonth ? '1904' : '',
+                                } : row));
+                              }}
                               className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-sm">
                               <option value="">Day</option>
                               {Array.from({ length: 31 }, (_, d) => String(d + 1).padStart(2, '0')).map(d => <option key={d}>{d}</option>)}
                             </select>
-                            <select value={p.birthdayMonth} onChange={e => updatePassenger(idx, 'birthdayMonth', e.target.value)}
+                            <select
+                              value={p.birthdayMonth}
+                              onChange={e => {
+                                const birthdayMonth = e.target.value;
+                                setPassengers(prev => prev.map((row, i) => i === idx ? {
+                                  ...row,
+                                  birthdayMonth,
+                                  birthdayYear: row.birthdayDay && birthdayMonth ? '1904' : '',
+                                } : row));
+                              }}
                               className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-sm">
                               <option value="">Month</option>
                               {MONTHS.map(m => <option key={m}>{m}</option>)}
                             </select>
-                            <input type="number" value={p.birthdayYear} onChange={e => updatePassenger(idx, 'birthdayYear', e.target.value)}
-                              placeholder="Year" min={1900} max={new Date().getFullYear()}
-                              className="w-full px-2 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                           </div>
                         </div>
                       </div>

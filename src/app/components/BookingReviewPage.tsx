@@ -660,7 +660,14 @@ export function BookingReviewPage({
                           <td className="px-3 py-2.5 font-mono text-gray-600">{p.doc}</td>
                           <td className="px-3 py-2.5 font-mono text-gray-600">{p.mem || '—'}</td>
                           <td className="px-3 py-2.5 text-gray-600">{p.ageGroup}</td>
-                          <td className="px-3 py-2.5 text-gray-600">{p.day} {p.month} {p.year}</td>
+                          <td className="px-3 py-2.5 text-gray-600">
+                            {p.day && p.month
+                              ? `${String(Number(p.day)).padStart(2, '0')}/${String(
+                                  ['January','February','March','April','May','June','July','August','September','October','November','December']
+                                    .findIndex((m) => m.toLowerCase() === String(p.month).toLowerCase()) + 1,
+                                ).padStart(2, '0')}`
+                              : '—'}
+                          </td>
                         </tr>
                       );
                     })}
