@@ -267,12 +267,12 @@ export const MERGE_FIXED_FIELDS = new Set([
 // ── Passenger seed data ───────────────────────────────────────────────────────
 
 const mockPassengerSeeds = [
-  { title: 'Mr'   as PassengerTitle, firstName: 'John',   lastName: 'Smith',   ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '14', month: 'March',     year: '1980', doc: 'K12345678', mem: 'MEM-0021', allergies: 'Shellfish, Peanuts' },
-  { title: 'Mrs'  as PassengerTitle, firstName: 'Mary',   lastName: 'Johnson', ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '22', month: 'July',      year: '1975', doc: 'H98765432', mem: '',         allergies: '' },
-  { title: 'Mr'   as PassengerTitle, firstName: 'David',  lastName: 'Lee',     ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '05', month: 'November',  year: '1990', doc: 'A11223344', mem: 'MEM-0087', allergies: 'Tree Nuts' },
-  { title: 'Miss' as PassengerTitle, firstName: 'Sarah',  lastName: 'Chen',    ageGroup: 'Child (2-12 years)' as AgeGroup, day: '30', month: 'January',   year: '2014', doc: 'B55667788', mem: '',         allergies: 'Dairy, Eggs' },
-  { title: 'Mr'   as PassengerTitle, firstName: 'Robert', lastName: 'Wang',    ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '18', month: 'September', year: '1968', doc: 'C99001122', mem: 'MEM-0145', allergies: '' },
-  { title: 'Mrs'  as PassengerTitle, firstName: 'Emma',   lastName: 'Wilson',  ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '07', month: 'April',     year: '1983', doc: 'D33445566', mem: '',         allergies: 'Gluten' },
+  { title: 'Mr'   as PassengerTitle, firstName: 'John',   lastName: 'Smith',   ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '01', month: 'March',     year: '1980', doc: 'K12345678', mem: 'MEM-0021', allergies: 'Shellfish, Peanuts' },
+  { title: 'Mrs'  as PassengerTitle, firstName: 'Mary',   lastName: 'Johnson', ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '01', month: 'July',      year: '1975', doc: 'H98765432', mem: '',         allergies: '' },
+  { title: 'Mr'   as PassengerTitle, firstName: 'David',  lastName: 'Lee',     ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '01', month: 'November',  year: '1990', doc: 'A11223344', mem: 'MEM-0087', allergies: 'Tree Nuts' },
+  { title: 'Miss' as PassengerTitle, firstName: 'Sarah',  lastName: 'Chen',    ageGroup: 'Child (2-12 years)' as AgeGroup, day: '01', month: 'January',   year: '2014', doc: 'B55667788', mem: '',         allergies: 'Dairy, Eggs' },
+  { title: 'Mr'   as PassengerTitle, firstName: 'Robert', lastName: 'Wang',    ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '01', month: 'September', year: '1968', doc: 'C99001122', mem: 'MEM-0145', allergies: '' },
+  { title: 'Mrs'  as PassengerTitle, firstName: 'Emma',   lastName: 'Wilson',  ageGroup: 'Adult (13+ years)'  as AgeGroup, day: '01', month: 'April',     year: '1983', doc: 'D33445566', mem: '',         allergies: 'Gluten' },
 ];
 
 export const isPassengerFilled = (p: PassengerDetail): boolean =>

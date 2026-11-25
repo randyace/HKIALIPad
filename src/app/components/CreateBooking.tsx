@@ -26,6 +26,7 @@ import {
 } from './ui/dialog';
 import { toast } from 'sonner@2.0.3';
 import { Shuffle } from 'lucide-react';
+import { lockedBirthdayDay, maxBirthYear } from '../../../../../lib/birthDate';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ const MONTHS = [
   'January','February','March','April','May','June',
   'July','August','September','October','November','December',
 ];
+
+const BIRTH_YEARS = (() => {
+  const years: number[] = [];
+  for (let y = maxBirthYear(); y >= 1900; y -= 1) years.push(y);
+  return years;
+})();
 
 const MEMBERSHIP_DISCOUNT: Record<string, number> = {
   Gold: 5, Platinum: 8, Diamond: 12, Sapphire: 15,
@@ -1234,18 +1241,18 @@ export function CreateBooking({
                           <label className="text-sm text-gray-600 block" style={{ marginBottom: '10px' }}>Birthday <span className="text-gray-400 font-normal">(optional)</span></label>
                           <div className="grid grid-cols-2 gap-2">
                             <select
-                              value={p.birthdayDay}
+                              value={p.birthdayYear}
                               onChange={e => {
-                                const birthdayDay = e.target.value;
+                                const birthdayYear = e.target.value;
                                 setPassengers(prev => prev.map((row, i) => i === idx ? {
                                   ...row,
-                                  birthdayDay,
-                                  birthdayYear: birthdayDay && row.birthdayMonth ? '1904' : '',
+                                  birthdayYear,
+                                  birthdayDay: lockedBirthdayDay(birthdayYear, row.birthdayMonth),
                                 } : row));
                               }}
                               className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-sm">
-                              <option value="">Day</option>
-                              {Array.from({ length: 31 }, (_, d) => String(d + 1).padStart(2, '0')).map(d => <option key={d}>{d}</option>)}
+                              <option value="">Year</option>
+                              {BIRTH_YEARS.map(y => <option key={y} value={String(y)}>{y}</option>)}
                             </select>
                             <select
                               value={p.birthdayMonth}
@@ -1254,7 +1261,7 @@ export function CreateBooking({
                                 setPassengers(prev => prev.map((row, i) => i === idx ? {
                                   ...row,
                                   birthdayMonth,
-                                  birthdayYear: row.birthdayDay && birthdayMonth ? '1904' : '',
+                                  birthdayDay: lockedBirthdayDay(row.birthdayYear, birthdayMonth),
                                 } : row));
                               }}
                               className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-sm">

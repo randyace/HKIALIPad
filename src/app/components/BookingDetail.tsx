@@ -21,6 +21,7 @@ import type {
   Booking, HistoricalGuest, PassengerTitle, AgeGroup,
   PassengerDetail, NonFlyingGuest,
 } from './booking/BookingDetailMocks';
+import { formatSplitBirthdayDisplay, lockedBirthdayDay, maxBirthYear } from '../../../../../lib/birthDate';
 import {
   HISTORICAL_GUESTS, DETAIL_AGENCY_DATA, EXPLICIT_BOOKING_OVERRIDES,
   MERGE_FIXED_FIELDS, emptyPassenger, MONTHS,
@@ -28,6 +29,12 @@ import {
   emptyNonFlyingGuest, buildInitialNonFlyingGuests,
   generateMockBooking,
 } from './booking/BookingDetailMocks';
+
+const BIRTH_YEARS = (() => {
+  const years: number[] = [];
+  for (let y = maxBirthYear(); y >= 1900; y -= 1) years.push(y);
+  return years;
+})();
 
 interface BookingDetailProps {
   bookingId: number;
@@ -763,12 +770,8 @@ export function BookingDetail({ bookingId = MOCK_BOOKING_ID, booking: bookingPro
         const p = passengers[0];
         if (!p || !isPassengerFilled(p) || !showSimilarBanner || mergeComplete) return null;
         const fullName = [p.title, p.firstName, p.lastName].filter(Boolean).join(' ');
-        const dob = [p.birthdayDay, p.birthdayMonth].filter(Boolean).length === 2
-          ? `${String(Number(p.birthdayDay)).padStart(2, '0')}/${String(
-              ['January','February','March','April','May','June','July','August','September','October','November','December']
-                .indexOf(p.birthdayMonth) + 1,
-            ).padStart(2, '0')}`
-          : [p.birthdayDay, p.birthdayMonth].filter(Boolean).join(' ');
+        const dob = formatSplitBirthdayDisplay(p.birthdayDay, p.birthdayMonth, p.birthdayYear)
+          || [p.birthdayYear, p.birthdayMonth].filter(Boolean).join(' ');
         const currentProfile = {
           accountNo: booking.accountNo,
           title: p.title,
@@ -1941,20 +1944,20 @@ export function BookingDetail({ bookingId = MOCK_BOOKING_ID, booking: bookingPro
                         <label className="text-sm text-gray-600 block mb-[10px]">Birthday <span className="text-gray-400 font-normal">(optional)</span></label>
                         <div className="grid grid-cols-2 gap-2">
                           <select
-                            value={p.birthdayDay}
+                            value={p.birthdayYear}
                             onChange={e => {
-                              const birthdayDay = e.target.value;
+                              const birthdayYear = e.target.value;
                               setPassengers(prev => prev.map((row, i) => i === idx ? {
                                 ...row,
-                                birthdayDay,
-                                birthdayYear: birthdayDay && row.birthdayMonth ? '1904' : '',
+                                birthdayYear,
+                                birthdayDay: lockedBirthdayDay(birthdayYear, row.birthdayMonth),
                               } : row));
                             }}
                             className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
                           >
-                            <option value="">Day</option>
-                            {Array.from({ length: 31 }, (_, d) => String(d + 1).padStart(2, '0')).map(d => (
-                              <option key={d} value={d}>{d}</option>
+                            <option value="">Year</option>
+                            {BIRTH_YEARS.map(y => (
+                              <option key={y} value={String(y)}>{y}</option>
                             ))}
                           </select>
                           <select
@@ -1964,7 +1967,7 @@ export function BookingDetail({ bookingId = MOCK_BOOKING_ID, booking: bookingPro
                               setPassengers(prev => prev.map((row, i) => i === idx ? {
                                 ...row,
                                 birthdayMonth,
-                                birthdayYear: row.birthdayDay && birthdayMonth ? '1904' : '',
+                                birthdayDay: lockedBirthdayDay(row.birthdayYear, birthdayMonth),
                               } : row));
                             }}
                             className="w-full px-2 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
