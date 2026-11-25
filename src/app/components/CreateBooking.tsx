@@ -109,7 +109,7 @@ const emptyNonFlying = (): NonFlyingGuest => ({
 });
 
 const isPassengerFilled = (p: PassengerDetail) =>
-  !!(p.title || p.firstName || p.lastName || p.travelDocNo || p.ageGroup || p.birthdayDay);
+  !!(p.title || p.firstName || p.lastName || p.travelDocNo || p.ageGroup || p.birthdayYear || p.birthdayMonth || p.birthdayDay);
 
 // ── MOCK constants (already module-scoped above: TRAVEL_AGENCY_LIST, SUITE_OPTIONS etc.) ──
 

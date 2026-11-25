@@ -276,7 +276,7 @@ const mockPassengerSeeds = [
 ];
 
 export const isPassengerFilled = (p: PassengerDetail): boolean =>
-  !!(p.title || p.firstName || p.lastName || p.travelDocNo || p.membershipNo || p.ageGroup || p.birthdayDay);
+  !!(p.title || p.firstName || p.lastName || p.travelDocNo || p.membershipNo || p.ageGroup || p.birthdayYear || p.birthdayMonth || p.birthdayDay);
 
 export const buildInitialPassengers = (total: number, bookingId: number): PassengerDetail[] =>
   Array.from({ length: total }, (_, idx) => {
